@@ -81,27 +81,27 @@ bool ForwardPlusRenderer::Initialize(
 
     BufferDesc cbDesc{};
     cbDesc.ConstantBuffer = true;
-    cbDesc.ByteWidth = sizeof(FrameConstants);
+    cbDesc.ByteSize = sizeof(FrameConstants);
     cbDesc.CpuWritable = true;
     frameCB_ = device_->CreateBuffer(cbDesc, nullptr);
 
-    cbDesc.ByteWidth = sizeof(LightConstants);
+    cbDesc.ByteSize = sizeof(LightConstants);
     lightCB_ = device_->CreateBuffer(cbDesc, nullptr);
 
-    cbDesc.ByteWidth = sizeof(ClusterConstants);
+    cbDesc.ByteSize = sizeof(ClusterConstants);
     clusterCB_ = device_->CreateBuffer(cbDesc, nullptr);
 
-    cbDesc.ByteWidth = sizeof(ObjectConstants);
+    cbDesc.ByteSize = sizeof(ObjectConstants);
     objectCB_ = device_->CreateBuffer(cbDesc, nullptr);
 
     BufferDesc sbDesc{};
     sbDesc.StructuredBuffer = true;
     sbDesc.CpuWritable = true;
-    sbDesc.ByteWidth = sizeof(ClusterRange) * MaxClusters;
+    sbDesc.ByteSize = sizeof(ClusterRange) * MaxClusters;
     sbDesc.ElementBytes = sizeof(ClusterRange);
     gridSB_ = device_->CreateBuffer(sbDesc, nullptr);
 
-    sbDesc.ByteWidth = sizeof(uint32_t) * MaxLightIndices;
+    sbDesc.ByteSize = sizeof(uint32_t) * MaxLightIndices;
     sbDesc.ElementBytes = sizeof(uint32_t);
     indexSB_ = device_->CreateBuffer(sbDesc, nullptr);
 
@@ -110,20 +110,20 @@ bool ForwardPlusRenderer::Initialize(
 
     BufferDesc vbDesc{};
     vbDesc.VertexBuffer = true;
-    vbDesc.ByteWidth = static_cast<uint32_t>(cubeData_.Vertices.size() * sizeof(MeshVertex));
+    vbDesc.ByteSize = static_cast<uint32_t>(cubeData_.Vertices.size() * sizeof(MeshVertex));
     vbDesc.StrideBytes = sizeof(MeshVertex);
     cubeVB_ = device_->CreateBuffer(vbDesc, cubeData_.Vertices.data());
 
     BufferDesc ibDesc{};
     ibDesc.IndexBuffer = true;
-    ibDesc.ByteWidth = static_cast<uint32_t>(cubeData_.Indices.size() * sizeof(uint32_t));
+    ibDesc.ByteSize = static_cast<uint32_t>(cubeData_.Indices.size() * sizeof(uint32_t));
     cubeIB_ = device_->CreateBuffer(ibDesc, cubeData_.Indices.data());
     cubeIndexCount_ = static_cast<uint32_t>(cubeData_.Indices.size());
 
-    vbDesc.ByteWidth = static_cast<uint32_t>(planeData_.Vertices.size() * sizeof(MeshVertex));
+    vbDesc.ByteSize = static_cast<uint32_t>(planeData_.Vertices.size() * sizeof(MeshVertex));
     planeVB_ = device_->CreateBuffer(vbDesc, planeData_.Vertices.data());
 
-    ibDesc.ByteWidth = static_cast<uint32_t>(planeData_.Indices.size() * sizeof(uint32_t));
+    ibDesc.ByteSize = static_cast<uint32_t>(planeData_.Indices.size() * sizeof(uint32_t));
     planeIB_ = device_->CreateBuffer(ibDesc, planeData_.Indices.data());
     planeIndexCount_ = static_cast<uint32_t>(planeData_.Indices.size());
 
@@ -152,7 +152,7 @@ void ForwardPlusRenderer::Shutdown()
         listener_ = nullptr;
     }
 
-    auto Release = [](rhi::IObject*& obj)
+    auto Release = [](auto*& obj)
     {
         if (obj != nullptr)
         {
