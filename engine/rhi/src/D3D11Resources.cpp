@@ -172,7 +172,7 @@ D3D11Texture::D3D11Texture(ID3D11Device* device, const TextureDesc& desc, const 
     }
 }
 
-D3D11Texture::D3D11Texture(ID3D11Device* device, ID3D11Texture2D* external, ID3D11RenderTargetView* rtv)
+D3D11Texture::D3D11Texture(ID3D11Device* /*device*/, ID3D11Texture2D* external, ID3D11RenderTargetView* rtv)
     : texture_(external)
     , rtv_(rtv)
 {
