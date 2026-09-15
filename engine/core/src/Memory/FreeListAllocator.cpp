@@ -137,7 +137,7 @@ void FreeListAllocator::DoReset() noexcept
     freeHead_->Next = nullptr;
 }
 
-size_t FreeListAllocator::ReportedSize(void* pointer, size_t requestedSize) noexcept
+size_t FreeListAllocator::ReportedSize(void* pointer, size_t /*requestedSize*/) noexcept
 {
     SlotRecord* record = reinterpret_cast<SlotRecord*>(
         reinterpret_cast<uintptr_t>(pointer) - SlotRecordBytes);

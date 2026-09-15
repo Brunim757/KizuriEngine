@@ -14,7 +14,7 @@ size_t AlignUpSize(size_t value, size_t alignment)
 
 } // namespace
 
-PoolAllocator::PoolAllocator(size_t objectSize, uint32_t blockCount, size_t slotAlignment)
+PoolAllocator::PoolAllocator(size_t objectSize, uint32_t blockCount, size_t /*slotAlignment*/)
     : Allocator("KizuriPoolAllocator")
     , objectSize_(objectSize < KernelAlignment ? KernelAlignment : objectSize)
     , blockCount_(blockCount)
@@ -83,12 +83,12 @@ void PoolAllocator::DoReset() noexcept
     }
 }
 
-size_t PoolAllocator::ReportedSize(void* pointer, size_t requestedSize) noexcept
+size_t PoolAllocator::ReportedSize(void* /*pointer*/, size_t /*requestedSize*/) noexcept
 {
     return blockSize_;
 }
 
-size_t PoolAllocator::RetiredSize(void* pointer) noexcept
+size_t PoolAllocator::RetiredSize(void* /*pointer*/) noexcept
 {
     return blockSize_;
 }

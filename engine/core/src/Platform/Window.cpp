@@ -170,7 +170,7 @@ void Window::ProcessMessages()
     input_.BeginFrame();
 }
 
-void Window::HandleNativeMessage(void* nativeWindow, uint32_t message, uintptr_t wParam, intptr_t lParam)
+void Window::HandleNativeMessage(void* /*nativeWindow*/, uint32_t message, uintptr_t wParam, intptr_t lParam)
 {
     switch (message)
     {

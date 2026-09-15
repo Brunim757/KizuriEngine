@@ -39,7 +39,7 @@ void* LinearAllocator::DoAllocate(size_t size, size_t alignment)
     return buffer_ + alignedCursor;
 }
 
-void LinearAllocator::DoFree(void* pointer) noexcept
+void LinearAllocator::DoFree(void* /*pointer*/) noexcept
 {
 }
 
