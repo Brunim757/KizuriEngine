@@ -359,9 +359,9 @@ void ForwardPlusRenderer::WatchShadersDirectory()
     auto* fw = new efsw::FileWatcher();
     fw->addWatch(".", listener, true);
 
-    for (auto& entry : { L"shaders", L"engine/renderer/shaders", L"../../engine/renderer/shaders" })
+    for (const char* entry : { "shaders", "engine/renderer/shaders", "../../engine/renderer/shaders" })
     {
-        DWORD attrs = GetFileAttributesW(entry);
+        DWORD attrs = GetFileAttributesA(entry);
         if (attrs != INVALID_FILE_ATTRIBUTES)
         {
             fw->addWatch(entry, listener, true);

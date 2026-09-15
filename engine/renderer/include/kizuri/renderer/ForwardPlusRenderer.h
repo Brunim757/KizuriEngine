@@ -89,6 +89,7 @@ private:
     FrameConstants frameConstants_{};
     LightConstants lightConstants_{};
     ClusterConstants clusterConstants_{};
+    bool vsync_ = true;
 
     std::string vsPath_;
     std::string psPath_;
