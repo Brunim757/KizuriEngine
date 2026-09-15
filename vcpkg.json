@@ -1,0 +1,10 @@
+{
+  "name": "kizuri-engine",
+  "version-string": "0.1.0",
+  "description": "Kizuri Engine - Fase 0 core dependencies",
+  "builtin-baseline": "4334d8b4c8916018600212ab4dd4bbdc343065d1",
+  "dependencies": [
+    "spdlog",
+    "catch2"
+  ]
+}

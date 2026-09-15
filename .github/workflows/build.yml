@@ -1,0 +1,82 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    name: Build (${{ matrix.config }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [Debug, Release]
+
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      VCPKG_CACHE_DIR: ${{ github.workspace }}/.vcpkg-cache
+      VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg-cache,readwrite"
+      CMAKE_BUILD_PARALLEL_LEVEL: 4
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Checkout vcpkg at pinned revision
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git $env:VCPKG_ROOT
+          Push-Location $env:VCPKG_ROOT
+          git checkout 4334d8b4c8916018600212ab4dd4bbdc343065d1
+          Pop-Location
+
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.VCPKG_CACHE_DIR }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
+
+      - name: Restore CMake build cache
+        id: build-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/build
+          key: cmake-${{ runner.os }}-${{ matrix.config }}-${{ hashFiles('CMakeLists.txt', 'vcpkg.json') }}
+          restore-keys: |
+            cmake-${{ runner.os }}-${{ matrix.config }}-
+
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          if ("$env:VCPKG_CACHE_DIR" -ne "") { New-Item -ItemType Directory -Force -Path "$env:VCPKG_CACHE_DIR" | Out-Null }
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          cmake -B build -S ${{ github.workspace }} `
+            -A x64 `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DKIZURI_BUILD_TESTS=OFF
+
+      - name: Build
+        shell: pwsh
+        run: |
+          cmake --build build --config ${{ matrix.config }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: kizuri-build-${{ matrix.config }}
+          path: |
+            build/bin/**
+            build/lib/**
+          if-no-files-found: error

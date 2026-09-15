@@ -1,0 +1,4 @@
+add_executable(KizuriEngine WIN32 src/main.cpp)
+target_link_libraries(KizuriEngine PRIVATE KizuriCore)
+target_compile_features(KizuriEngine PRIVATE cxx_std_20)
+kizuri_apply_compile_options(KizuriEngine)

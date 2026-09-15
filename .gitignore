@@ -1,0 +1,16 @@
+build/
+out/
+cmake-build-*/
+.vs/
+.vscode/
+CMakeUserPresets.json
+CMakePresets.json.user
+**/CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+install_manifest.txt
+*.suo
+*.user
+logs/
+*.log
+compile_commands.json
