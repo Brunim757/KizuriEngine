@@ -109,8 +109,8 @@ bool Window::Create(const WindowDesc& desc)
     windowClass.lpfnWndProc = &KizuriWndProc;
     windowClass.hInstance = GetModuleHandleW(nullptr);
     windowClass.lpszClassName = WindowClassName;
-    windowClass.hCursor = static_cast<HCURSOR>(LoadCursorW(nullptr, IDC_ARROW));
-    windowClass.hIcon = static_cast<HICON>(LoadIconW(nullptr, IDI_APPLICATION));
+    windowClass.hCursor = static_cast<HCURSOR>(LoadCursorW(nullptr, IDC_ARROWW));
+    windowClass.hIcon = static_cast<HICON>(LoadIconW(nullptr, IDI_APPLICATIONW));
 
     const ATOM classAtom = RegisterClassW(&windowClass);
     if (classAtom == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)

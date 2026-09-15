@@ -17,7 +17,7 @@ inline constexpr size_t KernelAlignment = 16;
 inline constexpr size_t PlatformCacheLineBytes = 64;
 
 struct FrameInfo {
-    uint32 Index;
+    uint32_t Index;
     double SecondsElapsed;
     double FrameTimeSeconds;
 };

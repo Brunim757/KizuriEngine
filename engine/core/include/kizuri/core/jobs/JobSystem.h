@@ -76,6 +76,8 @@ private:
         void Destroy();
     };
 
+    struct Worker;
+
     struct JobFiber
     {
         void* NativeHandle = nullptr;
