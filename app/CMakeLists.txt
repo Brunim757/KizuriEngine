@@ -2,3 +2,9 @@ add_executable(KizuriEngine WIN32 src/main.cpp)
 target_link_libraries(KizuriEngine PRIVATE KizuriCore KizuriRHI KizuriRenderer)
 target_compile_features(KizuriEngine PRIVATE cxx_std_20)
 kizuri_apply_compile_options(KizuriEngine)
+
+add_custom_command(TARGET KizuriEngine POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_SOURCE_DIR}/engine/renderer/shaders
+        $<TARGET_FILE_DIR:KizuriEngine>/shaders
+    COMMENT "Copying shaders next to KizuriEngine.exe")
