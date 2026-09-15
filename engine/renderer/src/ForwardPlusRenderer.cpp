@@ -17,6 +17,8 @@
 
 namespace kizuri::renderer {
 
+using namespace kizuri::rhi;
+
 namespace {
 
 constexpr float CheckerTileSize = 2.0f;
