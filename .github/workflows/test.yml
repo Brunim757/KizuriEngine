@@ -21,6 +21,7 @@ jobs:
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
       VCPKG_CACHE_DIR: ${{ github.workspace }}/.vcpkg-cache
       VCPKG_BINARY_SOURCES: "clear;files,${{ github.workspace }}/.vcpkg-cache,readwrite"
+      VCPKG_TARGET_TRIPLET: x64-windows-static-md
       CMAKE_BUILD_PARALLEL_LEVEL: 4
 
     steps:
@@ -39,17 +40,17 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ env.VCPKG_CACHE_DIR }}
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          key: vcpkg-${{ runner.os }}-${{ env.VCPKG_TARGET_TRIPLET }}-${{ hashFiles('vcpkg.json') }}
           restore-keys: |
-            vcpkg-${{ runner.os }}-
+            vcpkg-${{ runner.os }}-${{ env.VCPKG_TARGET_TRIPLET }}-
 
       - name: Restore CMake build cache
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/build
-          key: cmake-test-${{ runner.os }}-${{ matrix.config }}-${{ hashFiles('CMakeLists.txt', 'vcpkg.json') }}
+          key: cmake-test-${{ runner.os }}-${{ env.VCPKG_TARGET_TRIPLET }}-${{ matrix.config }}-${{ hashFiles('CMakeLists.txt', 'vcpkg.json') }}
           restore-keys: |
-            cmake-test-${{ runner.os }}-${{ matrix.config }}-
+            cmake-test-${{ runner.os }}-${{ env.VCPKG_TARGET_TRIPLET }}-${{ matrix.config }}-
 
       - name: Bootstrap vcpkg
         shell: pwsh
@@ -63,7 +64,7 @@ jobs:
           cmake -B build -S ${{ github.workspace }} `
             -A x64 `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
-            -DVCPKG_TARGET_TRIPLET=x64-windows `
+            -DVCPKG_TARGET_TRIPLET=$env:VCPKG_TARGET_TRIPLET `
             -DKIZURI_BUILD_TESTS=ON
 
       - name: Build with tests
