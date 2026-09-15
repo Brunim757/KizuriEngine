@@ -51,4 +51,6 @@ private:
 
 } // namespace kizuri::core
 
-#define KZ_PROFILE_SCOPE(name) ::kizuri::core::ProfilerScope kz_profile_scope_##__LINE__(name)
+#define KZ_PROFILE_CONCAT(a, b) KZ_PROFILE_CONCAT_IMPL(a, b)
+#define KZ_PROFILE_CONCAT_IMPL(a, b) a##b
+#define KZ_PROFILE_SCOPE(name) ::kizuri::core::ProfilerScope KZ_PROFILE_CONCAT(kz_profile_scope_, __LINE__)(name)
