@@ -168,7 +168,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 
             g_freeCam.Update(input, dt);
 
-            BuildSceneObjects(timer.ElapsedSeconds());
+            BuildSceneObjects(static_cast<float>(timer.ElapsedSeconds()));
 
             XMMATRIX view = g_freeCam.ViewMatrix();
             XMMATRIX proj = g_freeCam.ProjectionMatrix(SceneFov, SceneAspect, 0.1f, 500.0f);
