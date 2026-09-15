@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <cwchar>
 #include <fstream>
 #include <mutex>
 #include <string>
@@ -323,13 +324,48 @@ void ForwardPlusRenderer::LoadShaderFile(const wchar_t* path, std::string& outSo
 
 bool ForwardPlusRenderer::ResolveShaderPath(const wchar_t* shaderName, wchar_t* outFull, size_t outSize)
 {
-    if (!shadersDir_.empty())
+    wchar_t exeDir[MAX_PATH];
+    if (GetModuleFileNameW(nullptr, exeDir, MAX_PATH) > 0)
     {
-        swprintf(outFull, outSize, L"%s\\%s", shadersDir_.c_str(), shaderName);
-        DWORD attrs = GetFileAttributesW(outFull);
-        if (attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY))
+        wchar_t* lastSlash = wcsrchr(exeDir, L'\\');
+        if (lastSlash == nullptr)
         {
-            return true;
+            lastSlash = wcsrchr(exeDir, L'/');
+        }
+        if (lastSlash != nullptr)
+        {
+            *lastSlash = L'\0';
+        }
+
+        for (int up = 0; up < 5; ++up)
+        {
+            wchar_t probe[MAX_PATH];
+            swprintf(probe, MAX_PATH, L"%s\\engine\\renderer\\shaders\\%s", exeDir, shaderName);
+            DWORD attrs = GetFileAttributesW(probe);
+            if (attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY))
+            {
+                wcscpy_s(outFull, outSize, probe);
+                return true;
+            }
+
+            swprintf(probe, MAX_PATH, L"%s\\shaders\\%s", exeDir, shaderName);
+            attrs = GetFileAttributesW(probe);
+            if (attrs != INVALID_FILE_ATTRIBUTES && !(attrs & FILE_ATTRIBUTE_DIRECTORY))
+            {
+                wcscpy_s(outFull, outSize, probe);
+                return true;
+            }
+
+            wchar_t* slash = wcsrchr(exeDir, L'\\');
+            if (slash == nullptr)
+            {
+                slash = wcsrchr(exeDir, L'/');
+            }
+            if (slash == nullptr)
+            {
+                break;
+            }
+            *slash = L'\0';
         }
     }
 
@@ -357,14 +393,16 @@ void ForwardPlusRenderer::WatchShadersDirectory()
     listener_ = listener;
 
     auto* fw = new efsw::FileWatcher();
-    fw->addWatch(".", listener, true);
 
-    for (const char* entry : { "shaders", "engine/renderer/shaders", "../../engine/renderer/shaders" })
+    wchar_t watchPath[MAX_PATH];
+    if (ResolveShaderPath(L"MeshVs.hlsl", watchPath, MAX_PATH))
     {
-        DWORD attrs = GetFileAttributesA(entry);
-        if (attrs != INVALID_FILE_ATTRIBUTES)
+        wchar_t* slash = wcsrchr(watchPath, L'\\');
+        if (slash != nullptr)
         {
-            fw->addWatch(entry, listener, true);
+            *slash = L'\0';
+            std::string narrow(watchPath, watchPath + wcslen(watchPath));
+            fw->addWatch(narrow, listener, true);
         }
     }
 

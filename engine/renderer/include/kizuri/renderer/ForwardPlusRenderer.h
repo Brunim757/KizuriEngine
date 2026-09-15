@@ -44,6 +44,8 @@ public:
 
     uint32_t Width() const { return width_; }
     uint32_t Height() const { return height_; }
+    uint32_t ClusterVolume() const { return cluster_.ClusterCount(); }
+    uint32_t ClusterIndexCount() const { return cluster_.IndexCount(); }
 
 private:
     void StoreMatrix(XMFLOAT4X4& dst, FXMMATRIX m);

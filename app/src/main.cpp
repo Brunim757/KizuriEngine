@@ -190,11 +190,12 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
             if (timer.FrameIndex() % 300 == 0)
             {
                 Log::InfoFormatted(
-                    "frame %u | dt %.2f ms | lights %u | clusters %u",
+                    "frame %u | dt %.2f ms | lights %u | clusters %u | clusterIndices %u",
                     timer.FrameIndex(),
                     timer.LastFrameSeconds() * 1000.0,
                     OrbitLightCount,
-                    0);
+                    renderer.ClusterVolume(),
+                    renderer.ClusterIndexCount());
             }
 
             const uint32_t frameMs = static_cast<uint32_t>(timer.LastFrameSeconds() * 1000.0);
