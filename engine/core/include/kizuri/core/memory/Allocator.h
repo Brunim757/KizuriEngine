@@ -28,12 +28,12 @@ protected:
     virtual void DoFree(void* pointer) noexcept = 0;
     virtual void DoReset() noexcept {}
 
-    virtual size_t ReportedSize(void* pointer, size_t requestedSize) noexcept
+    virtual size_t ReportedSize(void* /*pointer*/, size_t requestedSize) noexcept
     {
         return requestedSize;
     }
 
-    virtual size_t RetiredSize(void* pointer) noexcept
+    virtual size_t RetiredSize(void* /*pointer*/) noexcept
     {
         return 0;
     }
