@@ -20,61 +20,48 @@ using namespace kizuri;
 using namespace kizuri::core;
 using namespace kizuri::renderer;
 
-constexpr uint32_t OrbitLightCount = 24;
-constexpr uint32_t CubeCount = 6;
-constexpr uint32_t FrameCapDurationMs = 16;
+constexpr uint32_t LightCount = 8;
+constexpr uint32_t CubeCount = 1;
 constexpr float SceneAspect = 16.0f / 9.0f;
 constexpr float SceneFov = 0.9f;
 
-renderer::GpuLight g_lights[OrbitLightCount];
+renderer::GpuLight g_lights[LightCount];
 renderer::ObjectData g_objects[CubeCount];
 renderer::FreeCameraController g_freeCam;
 
 void BuildSceneObjects(float t)
 {
     (void)t;
-    for (uint32_t i = 0; i < OrbitLightCount; ++i)
+    for (uint32_t i = 0; i < LightCount; ++i)
     {
-        float angle = static_cast<float>(i) * 6.2831853f / static_cast<float>(OrbitLightCount);
+        float angle = static_cast<float>(i) * 6.2831853f / static_cast<float>(LightCount);
         XMVECTOR pos = XMVectorSet(
-            cosf(angle) * 8.0f,
-            2.4f + sinf(angle * 2.0f) * 1.2f,
-            sinf(angle) * 8.0f,
+            cosf(angle) * 6.0f,
+            1.9f,
+            sinf(angle) * 6.0f,
             1.0f);
         XMStoreFloat3(&g_lights[i].Position, pos);
-        g_lights[i].Radius = 4.5f;
-        g_lights[i].Color = XMFLOAT3(
-            0.5f + 0.5f * sinf(angle * 3.0f),
-            0.5f + 0.5f * sinf(angle * 3.0f + 2.0f),
-            0.5f + 0.5f * sinf(angle * 3.0f + 4.0f));
-        g_lights[i].Intensity = 2.2f;
+        g_lights[i].Radius = 3.4f;
+        int lightKind = static_cast<int>(i % 3);
+        if (lightKind == 0)
+        {
+            g_lights[i].Color = XMFLOAT3(1.0f, 0.35f, 0.35f);
+        }
+        else if (lightKind == 1)
+        {
+            g_lights[i].Color = XMFLOAT3(0.35f, 1.0f, 0.45f);
+        }
+        else
+        {
+            g_lights[i].Color = XMFLOAT3(0.4f, 0.45f, 1.0f);
+        }
+        g_lights[i].Intensity = 1.6f;
     }
 
-    const XMFLOAT3 cubePositions[CubeCount] = {
-        { -6.0f, 2.0f, -2.0f },
-        { -3.0f, 2.0f,  2.0f },
-        {  0.0f, 2.0f, -2.0f },
-        {  3.0f, 2.0f,  2.0f },
-        {  6.0f, 2.0f, -2.0f },
-        {  0.0f, 4.5f,  0.0f },
-    };
-    const XMFLOAT3 cubeTints[CubeCount] = {
-        { 0.9f, 0.3f, 0.3f },
-        { 0.3f, 0.9f, 0.3f },
-        { 0.3f, 0.4f, 0.9f },
-        { 0.9f, 0.9f, 0.2f },
-        { 0.7f, 0.3f, 0.9f },
-        { 0.5f, 0.8f, 0.8f },
-    };
-
-    for (uint32_t i = 0; i < CubeCount; ++i)
-    {
-        XMMATRIX world = XMMatrixScaling(2.0f, 2.0f, 2.0f);
-        world *= XMMatrixRotationY(t * (0.3f + 0.15f * static_cast<float>(i)));
-        world *= XMMatrixTranslation(cubePositions[i].x, cubePositions[i].y, cubePositions[i].z);
-        g_objects[i].World = world;
-        g_objects[i].Tint = cubeTints[i];
-    }
+    XMMATRIX world = XMMatrixRotationY(t * 0.6f);
+    world *= XMMatrixScaling(1.4f, 1.4f, 1.4f);
+    g_objects[0].World = world;
+    g_objects[0].Tint = XMFLOAT3(0.85f, 0.75f, 0.6f);
 }
 
 void EmitProfilerSummary()
@@ -178,9 +165,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
             frame.Projection = &proj;
             frame.CameraPosition = g_freeCam.PositionFloat();
             frame.Lights = g_lights;
-            frame.LightCount = OrbitLightCount;
+            frame.LightCount = LightCount;
             frame.Objects = g_objects;
             frame.ObjectCount = CubeCount;
+            frame.ShowGroundPlane = false;
 
             renderer.TickHotReload();
 
@@ -193,15 +181,9 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
                     "frame %u | dt %.2f ms | lights %u | clusters %u | clusterIndices %u",
                     timer.FrameIndex(),
                     timer.LastFrameSeconds() * 1000.0,
-                    OrbitLightCount,
+                    LightCount,
                     renderer.ClusterVolume(),
                     renderer.ClusterIndexCount());
-            }
-
-            const uint32_t frameMs = static_cast<uint32_t>(timer.LastFrameSeconds() * 1000.0);
-            if (frameMs < FrameCapDurationMs)
-            {
-                Sleep(FrameCapDurationMs - frameMs);
             }
         }
         Profiler::EndFrame();

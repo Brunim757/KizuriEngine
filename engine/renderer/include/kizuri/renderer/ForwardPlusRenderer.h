@@ -23,6 +23,7 @@ struct RenderFrameData
     uint32_t LightCount;
     const ObjectData* Objects;
     uint32_t ObjectCount;
+    bool ShowGroundPlane = true;
 };
 
 class ForwardPlusRenderer {

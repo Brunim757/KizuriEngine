@@ -515,15 +515,18 @@ void ForwardPlusRenderer::Render(const RenderFrameData& frame)
 
     {
         KZ_PROFILE_SCOPE("DrawPlane");
-        ObjectConstants planeObj{};
-        StoreMatrix(planeObj.World, XMMatrixIdentity());
-        StoreMatrix(planeObj.WorldInverseTranspose, XMMatrixIdentity());
-        planeObj.Tint = XMFLOAT4(0.9f, 0.9f, 0.9f, 1.0f);
-        objectCB_->Update(&planeObj, sizeof(ObjectConstants));
-        cmd_->BindCB(objectCB_, 3);
-        cmd_->SetVertexBuffer(planeVB_);
-        cmd_->SetIndexBuffer(planeIB_);
-        cmd_->DrawIndexed(planeIndexCount_, 0, 0);
+        if (frame.ShowGroundPlane)
+        {
+            ObjectConstants planeObj{};
+            StoreMatrix(planeObj.World, XMMatrixIdentity());
+            StoreMatrix(planeObj.WorldInverseTranspose, XMMatrixIdentity());
+            planeObj.Tint = XMFLOAT4(0.9f, 0.9f, 0.9f, 1.0f);
+            objectCB_->Update(&planeObj, sizeof(ObjectConstants));
+            cmd_->BindCB(objectCB_, 3);
+            cmd_->SetVertexBuffer(planeVB_);
+            cmd_->SetIndexBuffer(planeIB_);
+            cmd_->DrawIndexed(planeIndexCount_, 0, 0);
+        }
     }
 
     {
