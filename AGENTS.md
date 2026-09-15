@@ -150,13 +150,13 @@
 
 ## 3. ROADMAP POR FASES (Épicos → Sistemas → Marcos)
 
-### FASE 0 — Fundação (Meses 1–3)
-- [ ] Setup do repositório, CMake, vcpkg, estrutura de módulos
-- [ ] CI: build.yml funcional (Windows Release/Debug)
-- [ ] Platform layer: janela, input, timer
-- [ ] Job System básico (fiber-based)
-- [ ] Alocadores customizados + sistema de memória rastreável
-- [ ] Logging (spdlog) + Profiling próprio (KizuriProfiler) integrados desde o dia 1
+### FASE 0 — Fundação (Meses 1–3) ✅ Concluída
+- [x] Setup do repositório, CMake, vcpkg, estrutura de módulos
+- [x] CI: build.yml funcional (Windows Release/Debug)
+- [x] Platform layer: janela, input, timer
+- [x] Job System básico (fiber-based)
+- [x] Alocadores customizados + sistema de memória rastreável
+- [x] Logging (spdlog) + Profiling próprio (KizuriProfiler) integrados desde o dia 1
 
 **Critério de aceite:**
 - CI (`build.yml`) verde em Debug e Release no Windows, com MSVC, do zero (clone limpo)

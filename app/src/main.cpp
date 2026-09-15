@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cmath>
 
 #include "kizuri/core/diagnostics/Log.h"
 #include "kizuri/core/diagnostics/Profiler.h"
@@ -9,21 +10,71 @@
 #include "kizuri/core/memory/MemoryTracker.h"
 #include "kizuri/core/platform/Timer.h"
 #include "kizuri/core/platform/Window.h"
+#include "kizuri/renderer/Camera.h"
+#include "kizuri/renderer/ForwardPlusRenderer.h"
+#include "kizuri/rhi/Rhi.h"
 
 namespace {
 
 using namespace kizuri;
 using namespace kizuri::core;
+using namespace kizuri::renderer;
 
-constexpr uint32_t FrameJobCount = 512;
+constexpr uint32_t OrbitLightCount = 24;
+constexpr uint32_t CubeCount = 6;
 constexpr uint32_t FrameCapDurationMs = 16;
+constexpr float SceneAspect = 16.0f / 9.0f;
+constexpr float SceneFov = 0.9f;
 
-std::atomic<uint64_t> g_frameSum{ 0 };
+renderer::GpuLight g_lights[OrbitLightCount];
+renderer::ObjectData g_objects[CubeCount];
+renderer::FreeCameraController g_freeCam;
 
-void SumFrameWork(void* userData, uint32_t index)
+void BuildSceneObjects(float t)
 {
-    std::atomic<uint64_t>* accumulator = static_cast<std::atomic<uint64_t>*>(userData);
-    accumulator->fetch_add(static_cast<uint64_t>(index));
+    (void)t;
+    for (uint32_t i = 0; i < OrbitLightCount; ++i)
+    {
+        float angle = static_cast<float>(i) * 6.2831853f / static_cast<float>(OrbitLightCount);
+        XMVECTOR pos = XMVectorSet(
+            cosf(angle) * 8.0f,
+            2.4f + sinf(angle * 2.0f) * 1.2f,
+            sinf(angle) * 8.0f,
+            1.0f);
+        XMStoreFloat3(&g_lights[i].Position, pos);
+        g_lights[i].Radius = 4.5f;
+        g_lights[i].Color = XMFLOAT3(
+            0.5f + 0.5f * sinf(angle * 3.0f),
+            0.5f + 0.5f * sinf(angle * 3.0f + 2.0f),
+            0.5f + 0.5f * sinf(angle * 3.0f + 4.0f));
+        g_lights[i].Intensity = 2.2f;
+    }
+
+    const XMFLOAT3 cubePositions[CubeCount] = {
+        { -6.0f, 2.0f, -2.0f },
+        { -3.0f, 2.0f,  2.0f },
+        {  0.0f, 2.0f, -2.0f },
+        {  3.0f, 2.0f,  2.0f },
+        {  6.0f, 2.0f, -2.0f },
+        {  0.0f, 4.5f,  0.0f },
+    };
+    const XMFLOAT3 cubeTints[CubeCount] = {
+        { 0.9f, 0.3f, 0.3f },
+        { 0.3f, 0.9f, 0.3f },
+        { 0.3f, 0.4f, 0.9f },
+        { 0.9f, 0.9f, 0.2f },
+        { 0.7f, 0.3f, 0.9f },
+        { 0.5f, 0.8f, 0.8f },
+    };
+
+    for (uint32_t i = 0; i < CubeCount; ++i)
+    {
+        XMMATRIX world = XMMatrixScaling(2.0f, 2.0f, 2.0f);
+        world *= XMMatrixRotationY(t * (0.3f + 0.15f * static_cast<float>(i)));
+        world *= XMMatrixTranslation(cubePositions[i].x, cubePositions[i].y, cubePositions[i].z);
+        g_objects[i].World = world;
+        g_objects[i].Tint = cubeTints[i];
+    }
 }
 
 void EmitProfilerSummary()
@@ -34,27 +85,8 @@ void EmitProfilerSummary()
         Log::Info("Profiler captured no frames");
         return;
     }
-
     ProfileFrame latest = Profiler::FrameAt(0);
-    uint32_t frameEntries = 0;
-    uint32_t scopeEntries = 0;
-    for (uint32_t i = 0; i < latest.EntryCount; ++i)
-    {
-        ++frameEntries;
-        ProfileEntry entry = Profiler::EntryAt(latest.FirstEntry + i);
-        if (entry.Name == nullptr)
-        {
-            continue;
-        }
-        if (entry.EndCycle >= entry.StartCycle && entry.EndCycle > 0)
-        {
-            ++scopeEntries;
-        }
-    }
-
-    Log::InfoFormatted(
-        "Profiler: %u frames captured, latest frame has %u entries, %u scopes measured",
-        frameCount, frameEntries, scopeEntries);
+    Log::InfoFormatted("Profiler: %u frames, latest frame has %u entries", frameCount, latest.EntryCount);
 }
 
 } // namespace
@@ -65,28 +97,52 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     logConfig.LogDirectory = "logs";
     logConfig.LogFileName = "kizuri.log";
     Log::Initialize(logConfig);
-    Log::InfoFormatted("KizuriEngine Fase 0 startup");
+    Log::Info("KizuriEngine Fase 1 startup");
 
     Profiler::Initialize();
-    JobSystem::Initialize(4);
-    Log::InfoFormatted("JobSystem initialized with %u workers", JobSystem::WorkerCount());
 
-    FrameTimer timer;
-    timer.Reset();
+    rhi::IDevice* device = rhi::RhiFactory::CreateDevice();
+    if (device == nullptr)
+    {
+        Log::Error("Failed to create RHI device");
+        Profiler::Shutdown();
+        Log::Shutdown();
+        return 1;
+    }
+
+    wchar_t adapterName[256];
+    device->GetAdapterName(adapterName, 256);
+    Log::InfoFormatted("RHI device created (adapter: %S)", adapterName);
 
     Window window;
     WindowDesc desc;
-    desc.Title = "Kizuri Engine - Fase 0";
+    desc.Title = "Kizuri Engine - Fase 1 (Forward+ Clustered)";
     desc.Width = 1280;
     desc.Height = 720;
     if (!window.Create(desc))
     {
         Log::Error("Failed to create platform window");
-        JobSystem::Shutdown();
+        device->Release();
         Profiler::Shutdown();
         Log::Shutdown();
         return 1;
     }
+
+    ForwardPlusRenderer renderer;
+    if (!renderer.Initialize(device, window.NativeHandle(), window.Width(), window.Height(),
+            L"engine/KizuriRenderer/shaders"))
+    {
+        Log::Error("Failed to initialize renderer");
+        window.Destroy();
+        device->Release();
+        Profiler::Shutdown();
+        Log::Shutdown();
+        return 1;
+    }
+
+    FrameTimer timer;
+    timer.Reset();
+    g_freeCam.SetSpeed(10.0f);
 
     while (!window.ShouldClose())
     {
@@ -97,30 +153,48 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
             window.ProcessMessages();
             const Input& input = window.GetInput();
 
+            if (window.Width() != renderer.Width() || window.Height() != renderer.Height())
+            {
+                renderer.Resize(window.Width(), window.Height());
+            }
+
             if (input.WasPressed(Key::Escape))
             {
-                Log::Info("Escape pressed, requesting window close");
                 window.RequestClose();
             }
 
             timer.BeginFrame();
+            float dt = static_cast<float>(timer.LastFrameSeconds());
 
-            KZ_PROFILE_SCOPE("FrameWork");
-            if (JobSystem::IsInitialized())
-            {
-                g_frameSum.store(0);
-                JobSystem::ParallelFor(FrameJobCount, &SumFrameWork, &g_frameSum);
-            }
+            g_freeCam.Update(input, dt);
+
+            BuildSceneObjects(timer.ElapsedSeconds());
+
+            XMMATRIX view = g_freeCam.ViewMatrix();
+            XMMATRIX proj = g_freeCam.ProjectionMatrix(SceneFov, SceneAspect, 0.1f, 500.0f);
+
+            RenderFrameData frame{};
+            frame.View = &view;
+            frame.Projection = &proj;
+            frame.CameraPosition = g_freeCam.PositionFloat();
+            frame.Lights = g_lights;
+            frame.LightCount = OrbitLightCount;
+            frame.Objects = g_objects;
+            frame.ObjectCount = CubeCount;
+
+            renderer.TickHotReload();
+
+            KZ_PROFILE_SCOPE("RendererRender");
+            renderer.Render(frame);
 
             if (timer.FrameIndex() % 300 == 0)
             {
                 Log::InfoFormatted(
-                    "frame %u | dt %.2f ms | sum %llu | mouse (%d, %d)",
+                    "frame %u | dt %.2f ms | lights %u | clusters %u",
                     timer.FrameIndex(),
                     timer.LastFrameSeconds() * 1000.0,
-                    static_cast<unsigned long long>(g_frameSum.load()),
-                    input.MouseX(),
-                    input.MouseY());
+                    OrbitLightCount,
+                    0);
             }
 
             const uint32_t frameMs = static_cast<uint32_t>(timer.LastFrameSeconds() * 1000.0);
@@ -133,9 +207,10 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
     }
 
     window.Destroy();
-
+    renderer.Shutdown();
     EmitProfilerSummary();
-    JobSystem::Shutdown();
+    device->ReportLiveObjects();
+    device->Release();
     Profiler::Shutdown();
 
     const bool memoryClean = MemoryTracker::Instance().IsZeroed();
