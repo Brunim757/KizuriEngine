@@ -333,8 +333,8 @@ bool ForwardPlusRenderer::ResolveShaderPath(const wchar_t* shaderName, wchar_t* 
 
     static const wchar_t* candidates[] = {
         L"shaders",
-        L"engine/KizuriRenderer/shaders",
-        L"../../engine/KizuriRenderer/shaders",
+        L"engine/renderer/shaders",
+        L"../../engine/renderer/shaders",
     };
 
     for (const wchar_t* dir : candidates)
@@ -357,7 +357,7 @@ void ForwardPlusRenderer::WatchShadersDirectory()
     auto* fw = new efsw::FileWatcher();
     fw->addWatch(".", listener, true);
 
-    for (auto& entry : { L"shaders", L"engine/KizuriRenderer/shaders", L"../../engine/KizuriRenderer/shaders" })
+    for (auto& entry : { L"shaders", L"engine/renderer/shaders", L"../../engine/renderer/shaders" })
     {
         DWORD attrs = GetFileAttributesW(entry);
         if (attrs != INVALID_FILE_ATTRIBUTES)

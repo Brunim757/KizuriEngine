@@ -64,4 +64,4 @@ jobs:
       - name: Validate shaders
         shell: pwsh
         run: |
-          & build\bin\Release\KizuriShaderValidator.exe engine/KizuriRenderer/shaders
+          & build\bin\Release\KizuriShaderValidator.exe engine/renderer/shaders

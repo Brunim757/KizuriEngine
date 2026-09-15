@@ -1,5 +1,9 @@
 #include "D3D11Internal.h"
 
+#ifdef _DEBUG
+extern "C" HRESULT WINAPI DXGIGetDebugInterface1(UINT flags, REFIID riid, void** ppv);
+#endif
+
 namespace kizuri::rhi {
 
 DXGI_FORMAT ToDxgiFormat(VertexFormat format)

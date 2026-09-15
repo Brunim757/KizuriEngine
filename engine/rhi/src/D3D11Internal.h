@@ -18,6 +18,12 @@ namespace kizuri::rhi {
 
 using Microsoft::WRL::ComPtr;
 
+class D3D11Buffer;
+class D3D11Texture;
+class D3D11Shader;
+class D3D11Pipeline;
+class D3D11SwapChain;
+
 DXGI_FORMAT ToDxgiFormat(VertexFormat format);
 DXGI_FORMAT ToDxgiFormat(TextureFormat format);
 D3D11_USAGE ToUsage(const BufferDesc& desc);
@@ -180,6 +186,8 @@ public:
     void SetPipeline(IPipeline* p) override;
     void SetRenderTarget(ITexture* color, ITexture* depth) override;
     void BindCB(IBuffer* cb, uint32_t slot) override;
+    void BindSRVBuffer(IBuffer* buffer, uint32_t slot) override;
+    void BindSampler(uint32_t slot) override;
     void BindSRV(ITexture* tex, uint32_t slot) override;
     void SetVertexBuffer(IBuffer* vb) override;
     void SetIndexBuffer(IBuffer* ib) override;

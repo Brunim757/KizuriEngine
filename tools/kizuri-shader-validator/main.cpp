@@ -58,7 +58,7 @@ static int CompileShader(const wchar_t* path, const char* target, const char* en
 
 int wmain(int argc, wchar_t* argv[])
 {
-    const wchar_t* shadersDir = L"engine/KizuriRenderer/shaders";
+    const wchar_t* shadersDir = L"engine/renderer/shaders";
     if (argc > 1)
     {
         shadersDir = argv[1];

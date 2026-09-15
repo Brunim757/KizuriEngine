@@ -130,7 +130,7 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
 
     ForwardPlusRenderer renderer;
     if (!renderer.Initialize(device, window.NativeHandle(), window.Width(), window.Height(),
-            L"engine/KizuriRenderer/shaders"))
+            L"engine/renderer/shaders"))
     {
         Log::Error("Failed to initialize renderer");
         window.Destroy();
