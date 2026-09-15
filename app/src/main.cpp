@@ -168,7 +168,6 @@ int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
             frame.LightCount = LightCount;
             frame.Objects = g_objects;
             frame.ObjectCount = CubeCount;
-            frame.ShowGroundPlane = false;
 
             renderer.TickHotReload();
 
