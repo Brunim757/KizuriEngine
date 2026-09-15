@@ -44,6 +44,14 @@ struct ShaderWatchListener : public efsw::FileWatchListener
     }
 };
 
+std::string ToNarrow(const wchar_t* wide)
+{
+    int size = WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr, nullptr);
+    std::string result(static_cast<size_t>(size), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wide, -1, result.data(), size, nullptr, nullptr);
+    return std::string(result.c_str());
+}
+
 } // namespace
 
 ForwardPlusRenderer::ForwardPlusRenderer() = default;
@@ -401,8 +409,7 @@ void ForwardPlusRenderer::WatchShadersDirectory()
         if (slash != nullptr)
         {
             *slash = L'\0';
-            std::string narrow(watchPath, watchPath + wcslen(watchPath));
-            fw->addWatch(narrow, listener, true);
+            fw->addWatch(ToNarrow(watchPath), listener, true);
         }
     }
 
