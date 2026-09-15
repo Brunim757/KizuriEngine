@@ -64,7 +64,7 @@ jobs:
           cmake -B build -S ${{ github.workspace }} `
             -A x64 `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake" `
-            -DVCPKG_TARGET_TRIPLET=$env:VCPKG_TARGET_TRIPLET `
+            -DVCPKG_TARGET_TRIPLET="$env:VCPKG_TARGET_TRIPLET" `
             -DKIZURI_BUILD_TESTS=ON
 
       - name: Build with tests
