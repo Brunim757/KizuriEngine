@@ -89,6 +89,29 @@ void EditorApp::DrawViewport() {
   viewW = iw;
   viewH = ih;
   viewValid = true;
+  if (selection.HasSelection()) {
+    Entity* e = scene.Get(selection.Get());
+    if (e != nullptr) {
+      DirectX::XMMATRIX view = camera.View();
+      float aspect = viewW / viewH;
+      DirectX::XMMATRIX proj = camera.Projection(aspect);
+      DirectX::XMFLOAT4X4 vf;
+      DirectX::XMFLOAT4X4 pf;
+      DirectX::XMStoreFloat4x4(&vf, view);
+      DirectX::XMStoreFloat4x4(&pf, proj);
+      float matrix[16];
+      ImGuizmo::RecomposeMatrixFromComponents(e->transform.position, e->transform.rotation, e->transform.scale, matrix);
+      ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
+      ImGuizmo::SetRect(viewX, viewY, viewW, viewH);
+      if (ImGuizmo::Manipulate(&vf.m[0][0], &pf.m[0][0], ImGuizmo::TRANSLATE, ImGuizmo::WORLD, matrix)) {
+        Transform t = e->transform;
+        ImGuizmo::DecomposeMatrixToComponents(matrix, t.position, t.rotation, t.scale);
+        scene.SetTransform(e->id, t);
+      }
+    } else {
+      selection.Clear();
+    }
+  }
   void* tex = renderer.IsReady() ? renderer.GetViewportTexture() : nullptr;
   if (tex != nullptr) {
     ImGui::Image(reinterpret_cast<ImTextureID>(tex), ImVec2(iw, ih));
@@ -220,29 +243,6 @@ void EditorApp::DrawViewport() {
       }
     }
     ImGui::EndPopup();
-  }
-  if (selection.HasSelection() && viewValid) {
-    Entity* e = scene.Get(selection.Get());
-    if (e != nullptr) {
-      DirectX::XMMATRIX view = camera.View();
-      float aspect = viewW / viewH;
-      DirectX::XMMATRIX proj = camera.Projection(aspect);
-      DirectX::XMFLOAT4X4 vf;
-      DirectX::XMFLOAT4X4 pf;
-      DirectX::XMStoreFloat4x4(&vf, view);
-      DirectX::XMStoreFloat4x4(&pf, proj);
-      float matrix[16];
-      ImGuizmo::RecomposeMatrixFromComponents(e->transform.position, e->transform.rotation, e->transform.scale, matrix);
-      ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
-      ImGuizmo::SetRect(viewX, viewY, viewW, viewH);
-      if (ImGuizmo::Manipulate(&vf.m[0][0], &pf.m[0][0], ImGuizmo::TRANSLATE, ImGuizmo::WORLD, matrix)) {
-        Transform t = e->transform;
-        ImGuizmo::DecomposeMatrixToComponents(matrix, t.position, t.rotation, t.scale);
-        scene.SetTransform(e->id, t);
-      }
-    } else {
-      selection.Clear();
-    }
   }
   ImGui::End();
 }
