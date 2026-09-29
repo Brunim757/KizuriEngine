@@ -603,18 +603,35 @@ bool TestScreenRect() {
   if (x1 - x0 <= 1.0f || y1 - y0 <= 1.0f) {
     return false;
   }
+  return true;
+}
+bool TestScreenRectBehind() {
+  Kizuri::Scene scene;
   Kizuri::EntityId b = scene.CreateEntity("B");
   Kizuri::Entity* e = scene.Get(b);
   e->transform.position[0] = 0.0f;
   e->transform.position[1] = 0.0f;
   e->transform.position[2] = -50.0f;
+  Kizuri::FreeCamera cam;
+  cam.SetPosition(0.0f, 0.0f, -5.0f);
+  cam.SetYawPitch(0.0f, 0.0f);
+  DirectX::XMMATRIX v = cam.View();
+  DirectX::XMMATRIX p = cam.Projection(800.0f / 600.0f);
+  DirectX::XMFLOAT4X4 vf;
+  DirectX::XMFLOAT4X4 pf;
+  DirectX::XMStoreFloat4x4(&vf, v);
+  DirectX::XMStoreFloat4x4(&pf, p);
+  float x0;
+  float y0;
+  float x1;
+  float y1;
   if (Kizuri::EntityScreenRect(scene, b, &vf.m[0][0], &pf.m[0][0], 0.0f, 0.0f, 800.0f, 600.0f, x0, y0, x1, y1)) {
     return false;
   }
-  if (!Kizuri::EntityScreenRect(scene, Kizuri::EntityId::Invalid(), &vf.m[0][0], &pf.m[0][0], 0.0f, 0.0f, 800.0f, 600.0f, x0, y0, x1, y1)) {
-    return true;
+  if (Kizuri::EntityScreenRect(scene, Kizuri::EntityId::Invalid(), &vf.m[0][0], &pf.m[0][0], 0.0f, 0.0f, 800.0f, 600.0f, x0, y0, x1, y1)) {
+    return false;
   }
-  return false;
+  return true;
 }
 bool TestRectOverlap() {
   if (!Kizuri::RectsOverlap(0.0f, 0.0f, 10.0f, 10.0f, 5.0f, 5.0f, 15.0f, 15.0f)) {
@@ -1031,6 +1048,7 @@ int main() {
   failures += Check("Scene-Parent", TestSceneParent());
   failures += Check("Selection-Set", TestSelectionSet());
   failures += Check("ScreenRect", TestScreenRect());
+  failures += Check("ScreenRectBehind", TestScreenRectBehind());
   failures += Check("RectOverlap", TestRectOverlap());
   failures += Check("LogStore", TestLog());
   failures += Check("EditQueue", TestEditQueue());
