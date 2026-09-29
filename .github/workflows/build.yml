@@ -1,0 +1,24 @@
+name: build
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Configure
+        run: cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Run KizuriHello
+        run: ./build/bin/Release/KizuriHello.exe
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: KizuriEngine-windows-x64
+          path: build/bin/Release/*.exe
+          if-no-files-found: error

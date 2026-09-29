@@ -1,0 +1,3 @@
+add_library(KizuriRender STATIC src/Render.cpp)
+target_include_directories(KizuriRender PUBLIC include)
+target_link_libraries(KizuriRender PUBLIC kizuri_imgui kizuri_imguizmo kizuri_cgltf kizuri_stb)

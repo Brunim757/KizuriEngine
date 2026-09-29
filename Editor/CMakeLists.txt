@@ -1,0 +1,2 @@
+add_executable(KizuriEditor src/main.cpp)
+target_link_libraries(KizuriEditor PRIVATE KizuriCore KizuriRender KizuriPhysics KizuriAnimation KizuriAudio KizuriScripting)
