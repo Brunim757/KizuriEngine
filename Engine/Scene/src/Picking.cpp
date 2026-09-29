@@ -99,13 +99,14 @@ bool EntityScreenRect(const Scene& scene, EntityId id, const float view[16], con
   std::memcpy(&pm, proj, sizeof(pm));
   XMMATRIX wm;
   std::memcpy(&wm, m, sizeof(wm));
+  XMMATRIX wv = wm * vm;
   XMMATRIX im = XMMatrixIdentity();
   bool first = true;
   for (int c = 0; c < 8; ++c) {
     float lx = (c & 1) ? 0.5f : -0.5f;
     float ly = (c & 2) ? 0.5f : -0.5f;
     float lz = (c & 4) ? 0.5f : -0.5f;
-    XMVECTOR vv = XMVector3TransformCoord(XMVectorSet(lx, ly, lz, 1.0f), vm);
+    XMVECTOR vv = XMVector3TransformCoord(XMVectorSet(lx, ly, lz, 1.0f), wv);
     XMFLOAT3 vs;
     XMStoreFloat3(&vs, vv);
     if (vs.z <= 0.01f) {
