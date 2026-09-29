@@ -80,7 +80,7 @@ void EditorApp::DrawViewport() {
   viewValid = true;
   void* tex = renderer.IsReady() ? renderer.GetViewportTexture() : nullptr;
   if (tex != nullptr) {
-    ImGui::Image(static_cast<ImTextureID>(tex), ImVec2(iw, ih));
+    ImGui::Image(reinterpret_cast<ImTextureID>(tex), ImVec2(iw, ih));
   } else {
     ImGui::Dummy(ImVec2(iw, ih));
   }
