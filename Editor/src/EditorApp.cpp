@@ -38,6 +38,7 @@ EditorApp::EditorApp()
   , rdownValid(false)
   , contextPick(EntityId::Invalid())
   , gizmoHotLast(false)
+  , gizmoDragging(false)
   , renameActive(false)
   , renameTarget(EntityId::Invalid())
   , titleDirtyShown(false)
@@ -47,6 +48,8 @@ EditorApp::EditorApp()
   , afterSaveRunPending(false)
   , savePromptQueued(false) {
   renameBuf[0] = '\0';
+  MakeIdentityTransform(gizmoStart);
+  gizmoTarget = EntityId::Invalid();
 }
 std::string EditorApp::FindShaderDir() {
   const char* dirs[4] = { "Shaders", "../Shaders", "../../Shaders", "build/bin/Release/Shaders" };
@@ -157,7 +160,7 @@ int EditorApp::Run() {
     if (dt > 0.1f) {
       dt = 0.1f;
     }
-    edits.ApplyAll(scene);
+    edits.ApplyAll(scene, undo);
     RawInputPoll::Poll();
     frameDt = dt;
     ImGui_ImplDX11_NewFrame();
@@ -199,15 +202,85 @@ void EditorApp::UpdateCamera(float dt, bool lookNow) {
     lookNow ? static_cast<float>(mdy) : 0.0f);
 }
 void EditorApp::CreateEntityAt(float x, float y, float z) {
-  EntityId id = scene.CreateEntity("Entity");
-  Entity* e = scene.Get(id);
-  if (e != nullptr) {
-    e->transform.position[0] = x;
-    e->transform.position[1] = y;
-    e->transform.position[2] = z;
+  Transform t;
+  MakeIdentityTransform(t);
+  t.position[0] = x;
+  t.position[1] = y;
+  t.position[2] = z;
+  std::unique_ptr<Command> cmd(new CreateEntityCmd("Entity", t, EntityId::Invalid()));
+  std::vector<EntityId> beforeIds = scene.All();
+  if (!undo.Execute(std::move(cmd), scene)) {
+    return;
   }
-  selection.Select(id);
-  log.Add(LogLevel::Info, std::string("Created ") + (e != nullptr ? e->name : "Entity"));
+  SelectNewEntity(beforeIds);
+  log.Add(LogLevel::Info, "Created Entity");
+}
+void EditorApp::DoUndo() {
+  if (!undo.CanUndo()) {
+    return;
+  }
+  std::string name = undo.UndoName();
+  undo.Undo(scene);
+  SyncSelection();
+  log.Add(LogLevel::Info, std::string("Undo ") + name);
+}
+void EditorApp::DoRedo() {
+  if (!undo.CanRedo()) {
+    return;
+  }
+  std::string name = undo.RedoName();
+  undo.Redo(scene);
+  SyncSelection();
+  log.Add(LogLevel::Info, std::string("Redo ") + name);
+}
+void EditorApp::SyncSelection() {
+  if (selection.HasSelection() && !scene.Has(selection.Get())) {
+    selection.Clear();
+  }
+}
+void EditorApp::SelectNewEntity(const std::vector<EntityId>& beforeIds) {
+  std::vector<EntityId> afterIds = scene.All();
+  for (size_t i = 0; i < afterIds.size(); ++i) {
+    bool found = false;
+    for (size_t j = 0; j < beforeIds.size(); ++j) {
+      if (afterIds[i] == beforeIds[j]) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      selection.Select(afterIds[i]);
+      return;
+    }
+  }
+}
+void EditorApp::DuplicateViaCommand(EntityId id) {
+  const Entity* e = scene.Get(id);
+  if (e == nullptr) {
+    return;
+  }
+  std::string name = e->name;
+  std::unique_ptr<Command> cmd(new DuplicateCmd(id));
+  std::vector<EntityId> beforeIds = scene.All();
+  if (!undo.Execute(std::move(cmd), scene)) {
+    return;
+  }
+  SelectNewEntity(beforeIds);
+  log.Add(LogLevel::Info, std::string("Duplicated ") + name);
+}
+void EditorApp::DeleteViaCommand(EntityId id) {
+  const Entity* e = scene.Get(id);
+  if (e == nullptr) {
+    return;
+  }
+  std::string name = e->name;
+  std::unique_ptr<Command> cmd(new DeleteEntityCmd(id));
+  if (!undo.Execute(std::move(cmd), scene)) {
+    return;
+  }
+  selection.OnEntityDeleted(id);
+  SyncSelection();
+  log.Add(LogLevel::Warning, std::string("Deleted ") + name);
 }
 void EditorApp::FocusEntity(EntityId id) {
   const Entity* e = scene.Get(id);
@@ -225,6 +298,16 @@ void EditorApp::Frame() {
   if (savePromptQueued) {
     savePromptQueued = false;
     ImGui::OpenPopup("Unsaved Changes");
+  }
+  ImGuiIO& keysIo = ImGui::GetIO();
+  if (!keysIo.WantTextInput && keysIo.KeyCtrl) {
+    if (keysIo.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
+      DoRedo();
+    } else if (ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
+      DoUndo();
+    } else if (ImGui::IsKeyPressed(ImGuiKey_Y, false)) {
+      DoRedo();
+    }
   }
   DrawMenuBar();
   if (showViewport) {
@@ -273,6 +356,17 @@ void EditorApp::DrawMenuBar() {
       }
       if (ImGui::MenuItem("Exit")) {
         RequestAction(3);
+      }
+      ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu("Edit")) {
+      std::string undoLabel = std::string("Undo ") + undo.UndoName();
+      std::string redoLabel = std::string("Redo ") + undo.RedoName();
+      if (ImGui::MenuItem(undoLabel.c_str(), "Ctrl+Z", false, undo.CanUndo())) {
+        DoUndo();
+      }
+      if (ImGui::MenuItem(redoLabel.c_str(), "Ctrl+Y", false, undo.CanRedo())) {
+        DoRedo();
       }
       ImGui::EndMenu();
     }
@@ -367,6 +461,7 @@ void EditorApp::DoNewScene() {
   scene.Clear();
   selection.Clear();
   edits.Clear();
+  undo.Clear();
   currentPath.clear();
   log.Add(LogLevel::Warning, "Scene cleared");
 }
@@ -384,6 +479,7 @@ void EditorApp::DoOpenPath(const std::string& path) {
     currentPath = path;
     selection.Clear();
     edits.Clear();
+    undo.Clear();
     log.Add(LogLevel::Success, std::string("Scene opened: ") + path);
   }
 }

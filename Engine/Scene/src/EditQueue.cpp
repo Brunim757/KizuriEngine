@@ -1,4 +1,6 @@
 #include "Kizuri/EditQueue.h"
+#include "Kizuri/Undo.h"
+#include <cstring>
 namespace Kizuri {
 void EditQueue::PushTransform(EntityId target, const Transform& value) {
   if (!target.IsValid()) {
@@ -12,7 +14,7 @@ void EditQueue::PushTransform(EntityId target, const Transform& value) {
 size_t EditQueue::Pending() const {
   return edits.size();
 }
-size_t EditQueue::ApplyAll(Scene& scene) {
+size_t EditQueue::ApplyAll(Scene& scene, UndoStack& undo) {
   size_t applied = 0;
   for (size_t i = 0; i < edits.size(); ++i) {
     bool last = true;
@@ -22,7 +24,18 @@ size_t EditQueue::ApplyAll(Scene& scene) {
         break;
       }
     }
-    if (last && scene.SetTransform(edits[i].target, edits[i].value)) {
+    if (!last) {
+      continue;
+    }
+    const Entity* e = scene.Get(edits[i].target);
+    if (e == nullptr) {
+      continue;
+    }
+    if (std::memcmp(&e->transform, &edits[i].value, sizeof(Transform)) == 0) {
+      continue;
+    }
+    std::unique_ptr<Command> cmd(new EditTransformCmd(edits[i].target, e->transform, edits[i].value));
+    if (undo.Execute(std::move(cmd), scene)) {
       ++applied;
     }
   }

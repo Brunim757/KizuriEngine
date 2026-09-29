@@ -19,6 +19,7 @@
 #include "Kizuri/Picking.h"
 #include "Kizuri/Reflection.h"
 #include "Kizuri/SceneSerializer.h"
+#include "Kizuri/Undo.h"
 #include <DirectXMath.h>
 #include <TaskScheduler.h>
 #include <cstdio>
@@ -761,6 +762,155 @@ bool TestSceneInvalid() {
   std::remove(bad2);
   return ok;
 }
+bool TestUndoCreate() {
+  Kizuri::Scene scene;
+  Kizuri::UndoStack undo;
+  Kizuri::Transform t;
+  Kizuri::MakeIdentityTransform(t);
+  t.position[0] = 5.0f;
+  std::unique_ptr<Kizuri::Command> cmd(new Kizuri::CreateEntityCmd("Undo1", t, Kizuri::EntityId::Invalid()));
+  if (!undo.Execute(std::move(cmd), scene) || scene.Count() != 1) {
+    return false;
+  }
+  if (!undo.CanUndo() || undo.UndoDepth() != 1) {
+    return false;
+  }
+  if (!undo.Undo(scene) || scene.Count() != 0) {
+    return false;
+  }
+  if (!undo.CanRedo()) {
+    return false;
+  }
+  if (!undo.Redo(scene) || scene.Count() != 1) {
+    return false;
+  }
+  std::vector<Kizuri::EntityId> all = scene.All();
+  const Kizuri::Entity* e = scene.Get(all[0]);
+  return e != nullptr && e->name == "Undo1" && e->transform.position[0] == 5.0f;
+}
+bool TestUndoDelete() {
+  Kizuri::Scene scene;
+  Kizuri::UndoStack undo;
+  Kizuri::EntityId a = scene.CreateEntity("Keep");
+  Kizuri::EntityId b = scene.CreateEntity("Gone");
+  Kizuri::Transform t;
+  Kizuri::MakeIdentityTransform(t);
+  t.position[1] = 3.0f;
+  scene.SetTransform(b, t);
+  scene.SetParent(b, a);
+  std::unique_ptr<Kizuri::Command> cmd(new Kizuri::DeleteEntityCmd(b));
+  if (!undo.Execute(std::move(cmd), scene) || scene.Count() != 1) {
+    return false;
+  }
+  if (!undo.Undo(scene) || scene.Count() != 2) {
+    return false;
+  }
+  const Kizuri::Entity* rb = nullptr;
+  std::vector<Kizuri::EntityId> all = scene.All();
+  for (size_t i = 0; i < all.size(); ++i) {
+    const Kizuri::Entity* e = scene.Get(all[i]);
+    if (e->name == "Gone") {
+      rb = e;
+    }
+  }
+  if (rb == nullptr || rb->transform.position[1] != 3.0f) {
+    return false;
+  }
+  if (!rb->parent.IsValid()) {
+    return false;
+  }
+  if (!undo.Redo(scene) || scene.Count() != 1) {
+    return false;
+  }
+  return true;
+}
+bool TestUndoEdit() {
+  Kizuri::Scene scene;
+  Kizuri::UndoStack undo;
+  Kizuri::EntityId a = scene.CreateEntity("Mover");
+  const Kizuri::Entity* e0 = scene.Get(a);
+  Kizuri::Transform before = e0->transform;
+  Kizuri::Transform after = before;
+  after.position[0] = 9.0f;
+  after.rotation[1] = 45.0f;
+  std::unique_ptr<Kizuri::Command> cmd(new Kizuri::EditTransformCmd(a, before, after));
+  if (!undo.Execute(std::move(cmd), scene)) {
+    return false;
+  }
+  if (scene.Get(a)->transform.position[0] != 9.0f) {
+    return false;
+  }
+  if (!undo.Undo(scene) || scene.Get(a)->transform.position[0] != 0.0f) {
+    return false;
+  }
+  if (!undo.Redo(scene) || scene.Get(a)->transform.rotation[1] != 45.0f) {
+    return false;
+  }
+  return true;
+}
+bool TestUndoRenameParent() {
+  Kizuri::Scene scene;
+  Kizuri::UndoStack undo;
+  Kizuri::EntityId a = scene.CreateEntity("A");
+  Kizuri::EntityId b = scene.CreateEntity("B");
+  std::unique_ptr<Kizuri::Command> rcmd(new Kizuri::RenameCmd(a, "A", "A2"));
+  if (!undo.Execute(std::move(rcmd), scene) || scene.Get(a)->name != "A2") {
+    return false;
+  }
+  std::unique_ptr<Kizuri::Command> pcmd(new Kizuri::SetParentCmd(b, Kizuri::EntityId::Invalid(), a));
+  if (!undo.Execute(std::move(pcmd), scene)) {
+    return false;
+  }
+  if (!scene.Get(b)->parent.IsValid()) {
+    return false;
+  }
+  if (!undo.Undo(scene) || scene.Get(b)->parent.IsValid()) {
+    return false;
+  }
+  if (!undo.Undo(scene) || scene.Get(a)->name != "A") {
+    return false;
+  }
+  if (!undo.Redo(scene) || scene.Get(a)->name != "A2") {
+    return false;
+  }
+  if (!undo.Redo(scene) || !scene.Get(b)->parent.IsValid()) {
+    return false;
+  }
+  return true;
+}
+bool TestUndoStack() {
+  Kizuri::Scene scene;
+  Kizuri::UndoStack undo;
+  if (undo.CanUndo() || undo.CanRedo()) {
+    return false;
+  }
+  if (undo.Undo(scene) || undo.Redo(scene)) {
+    return false;
+  }
+  Kizuri::Transform t;
+  Kizuri::MakeIdentityTransform(t);
+  std::unique_ptr<Kizuri::Command> c1(new Kizuri::CreateEntityCmd("One", t, Kizuri::EntityId::Invalid()));
+  std::unique_ptr<Kizuri::Command> c2(new Kizuri::CreateEntityCmd("Two", t, Kizuri::EntityId::Invalid()));
+  undo.Execute(std::move(c1), scene);
+  undo.Execute(std::move(c2), scene);
+  if (scene.Count() != 2 || undo.UndoDepth() != 2) {
+    return false;
+  }
+  undo.Undo(scene);
+  if (scene.Count() != 1 || undo.RedoDepth() != 1) {
+    return false;
+  }
+  std::unique_ptr<Kizuri::Command> c3(new Kizuri::CreateEntityCmd("Three", t, Kizuri::EntityId::Invalid()));
+  undo.Execute(std::move(c3), scene);
+  if (undo.CanRedo() || scene.Count() != 2) {
+    return false;
+  }
+  undo.Clear();
+  if (undo.CanUndo() || undo.CanRedo()) {
+    return false;
+  }
+  return true;
+}
 }
 int main() {
   std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -798,6 +948,11 @@ int main() {
   failures += Check("Picking", TestPicking());
   failures += Check("Scene-RoundTrip", TestSceneRoundTrip());
   failures += Check("Scene-InvalidFile", TestSceneInvalid());
+  failures += Check("Undo-Create", TestUndoCreate());
+  failures += Check("Undo-Delete", TestUndoDelete());
+  failures += Check("Undo-Edit", TestUndoEdit());
+  failures += Check("Undo-RenameParent", TestUndoRenameParent());
+  failures += Check("Undo-Stack", TestUndoStack());
   if (failures == 0) {
     std::printf("KizuriHello: all bootstrap libs linked and functional\n");
   } else {

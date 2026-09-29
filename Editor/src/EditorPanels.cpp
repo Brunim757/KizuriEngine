@@ -130,9 +130,22 @@ void EditorApp::DrawViewport() {
       ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
       ImGuizmo::SetRect(viewX, viewY, viewW, viewH);
       if (ImGuizmo::Manipulate(&vf.m[0][0], &pf.m[0][0], static_cast<ImGuizmo::OPERATION>(gizmoOp), ImGuizmo::WORLD, matrix)) {
+        if (!gizmoDragging) {
+          gizmoDragging = true;
+          gizmoStart = e->transform;
+          gizmoTarget = e->id;
+        }
         Transform t = e->transform;
         ImGuizmo::DecomposeMatrixToComponents(matrix, t.position, t.rotation, t.scale);
         scene.SetTransform(e->id, t);
+      } else if (gizmoDragging) {
+        gizmoDragging = false;
+        const Entity* cur = scene.Get(gizmoTarget);
+        if (cur != nullptr && std::memcmp(&gizmoStart, &cur->transform, sizeof(Transform)) != 0) {
+          std::unique_ptr<Command> cmd(new EditTransformCmd(gizmoTarget, gizmoStart, cur->transform));
+          undo.Commit(std::move(cmd));
+        }
+        gizmoTarget = EntityId::Invalid();
       }
     } else {
       selection.Clear();
@@ -237,17 +250,10 @@ void EditorApp::DrawViewport() {
           FocusEntity(target);
         }
         if (ImGui::MenuItem("Duplicate")) {
-          EntityId copy = scene.DuplicateEntity(target);
-          if (copy.IsValid()) {
-            selection.Select(copy);
-            const Entity* ce = scene.Get(copy);
-            log.Add(LogLevel::Info, std::string("Duplicated ") + (ce != nullptr ? ce->name : ""));
-          }
+          DuplicateViaCommand(target);
         }
         if (ImGui::MenuItem("Delete")) {
-          scene.DeleteEntity(target);
-          selection.OnEntityDeleted(target);
-          log.Add(LogLevel::Warning, "Entity deleted");
+          DeleteViaCommand(target);
         }
       }
     } else {
@@ -305,8 +311,14 @@ void EditorApp::DrawHierarchy() {
     if (renameActive && renameTarget == e->id) {
       ImGui::SetKeyboardFocusHere(0);
       if (ImGui::InputText("##rename", renameBuf, sizeof(renameBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
-        scene.RenameEntity(e->id, renameBuf);
-        log.Add(LogLevel::Info, std::string("Renamed to ") + renameBuf);
+        std::string oldName = e->name;
+        std::string newName = renameBuf;
+        if (oldName != newName) {
+          std::unique_ptr<Command> cmd(new RenameCmd(e->id, oldName, newName));
+          if (undo.Execute(std::move(cmd), scene)) {
+            log.Add(LogLevel::Info, std::string("Renamed to ") + newName);
+          }
+        }
         renameActive = false;
       }
       if (!ImGui::IsItemActive() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
@@ -329,15 +341,10 @@ void EditorApp::DrawHierarchy() {
         CreateEntityAt(0.0f, 0.0f, 0.0f);
       }
       if (ImGui::MenuItem("Duplicate")) {
-        EntityId copy = scene.DuplicateEntity(e->id);
-        if (copy.IsValid()) {
-          selection.Select(copy);
-        }
+        DuplicateViaCommand(e->id);
       }
       if (ImGui::MenuItem("Delete")) {
-        scene.DeleteEntity(e->id);
-        selection.OnEntityDeleted(e->id);
-        log.Add(LogLevel::Warning, "Entity deleted");
+        DeleteViaCommand(e->id);
       }
       if (ImGui::MenuItem("Rename")) {
         renameActive = true;

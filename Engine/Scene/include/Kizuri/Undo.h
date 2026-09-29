@@ -1,0 +1,111 @@
+#pragma once
+#include "Kizuri/Scene.h"
+#include <memory>
+#include <string>
+#include <vector>
+namespace Kizuri {
+struct Command {
+  virtual ~Command() = default;
+  virtual bool Apply(Scene& scene) = 0;
+  virtual bool Revert(Scene& scene) = 0;
+  virtual const char* Name() const = 0;
+};
+struct SnapshotNode {
+  std::string name;
+  Transform transform;
+  long parent;
+};
+struct EntitySnapshot {
+  std::vector<SnapshotNode> nodes;
+  EntityId originalParent;
+  bool Capture(const Scene& scene, EntityId root);
+  EntityId Restore(Scene& scene, EntityId newParent) const;
+};
+class CreateEntityCmd : public Command {
+public:
+  CreateEntityCmd(const std::string& name, const Transform& t, EntityId parent);
+  bool Apply(Scene& scene) override;
+  bool Revert(Scene& scene) override;
+  const char* Name() const override;
+private:
+  std::string name;
+  Transform transform;
+  EntityId parent;
+  EntityId live;
+};
+class DeleteEntityCmd : public Command {
+public:
+  explicit DeleteEntityCmd(EntityId target);
+  bool Apply(Scene& scene) override;
+  bool Revert(Scene& scene) override;
+  const char* Name() const override;
+private:
+  EntityId target;
+  EntityId live;
+  EntitySnapshot snapshot;
+  bool captured;
+};
+class DuplicateCmd : public Command {
+public:
+  explicit DuplicateCmd(EntityId source);
+  bool Apply(Scene& scene) override;
+  bool Revert(Scene& scene) override;
+  const char* Name() const override;
+private:
+  EntityId source;
+  EntityId live;
+  EntitySnapshot snapshot;
+  bool captured;
+};
+class EditTransformCmd : public Command {
+public:
+  EditTransformCmd(EntityId target, const Transform& before, const Transform& after);
+  bool Apply(Scene& scene) override;
+  bool Revert(Scene& scene) override;
+  const char* Name() const override;
+private:
+  EntityId target;
+  Transform before;
+  Transform after;
+};
+class RenameCmd : public Command {
+public:
+  RenameCmd(EntityId target, const std::string& before, const std::string& after);
+  bool Apply(Scene& scene) override;
+  bool Revert(Scene& scene) override;
+  const char* Name() const override;
+private:
+  EntityId target;
+  std::string before;
+  std::string after;
+};
+class SetParentCmd : public Command {
+public:
+  SetParentCmd(EntityId child, EntityId before, EntityId after);
+  bool Apply(Scene& scene) override;
+  bool Revert(Scene& scene) override;
+  const char* Name() const override;
+private:
+  EntityId child;
+  EntityId before;
+  EntityId after;
+};
+class UndoStack {
+public:
+  UndoStack();
+  bool Execute(std::unique_ptr<Command> cmd, Scene& scene);
+  bool Commit(std::unique_ptr<Command> cmd);
+  bool Undo(Scene& scene);
+  bool Redo(Scene& scene);
+  bool CanUndo() const;
+  bool CanRedo() const;
+  const char* UndoName() const;
+  const char* RedoName() const;
+  void Clear();
+  size_t UndoDepth() const;
+  size_t RedoDepth() const;
+private:
+  std::vector<std::unique_ptr<Command>> undo;
+  std::vector<std::unique_ptr<Command>> redo;
+};
+}

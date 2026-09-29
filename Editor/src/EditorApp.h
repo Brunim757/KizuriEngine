@@ -3,6 +3,7 @@
 #include "Kizuri/Selection.h"
 #include "Kizuri/Log.h"
 #include "Kizuri/EditQueue.h"
+#include "Kizuri/Undo.h"
 #include "Kizuri/Window.h"
 #include "Kizuri/RHI.h"
 #include "Kizuri/Camera.h"
@@ -18,6 +19,10 @@ struct EditorApp {
   SingleSelection selection;
   LogStore log;
   EditQueue edits;
+  UndoStack undo;
+  bool gizmoDragging;
+  Transform gizmoStart;
+  EntityId gizmoTarget;
   FreeCamera camera;
   StaticMesh cubeMesh;
   bool cubeReady;
@@ -79,6 +84,12 @@ struct EditorApp {
   void DoNewScene();
   void DrawSavePrompt();
   void ProcessQueuedDialogs();
+  void DoUndo();
+  void DoRedo();
+  void SyncSelection();
+  void SelectNewEntity(const std::vector<EntityId>& beforeIds);
+  void DuplicateViaCommand(EntityId id);
+  void DeleteViaCommand(EntityId id);
   std::string FindAsset(const char* name);
   std::string FindShaderDir();
 };
