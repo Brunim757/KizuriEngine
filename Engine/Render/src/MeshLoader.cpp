@@ -4,7 +4,7 @@
 namespace Kizuri {
 namespace {
 bool ReadFloat3(const cgltf_accessor* acc, size_t idx, float& x, float& y, float& z) {
-  if (acc == nullptr || acc->type != cgltf_type_vec3 || acc->component_type != cgltf_component_type_r_float) {
+  if (acc == nullptr || acc->type != cgltf_type_vec3 || acc->component_type != cgltf_component_type_r_32f) {
     return false;
   }
   if (idx >= acc->count) {
@@ -19,7 +19,7 @@ bool ReadFloat3(const cgltf_accessor* acc, size_t idx, float& x, float& y, float
   return true;
 }
 bool ReadFloat2(const cgltf_accessor* acc, size_t idx, float& x, float& y) {
-  if (acc == nullptr || acc->type != cgltf_type_vec2 || acc->component_type != cgltf_component_type_r_float) {
+  if (acc == nullptr || acc->type != cgltf_type_vec2 || acc->component_type != cgltf_component_type_r_32f) {
     return false;
   }
   if (idx >= acc->count) {
