@@ -1,14 +1,59 @@
 #pragma once
+#include <stdint.h>
 namespace Kizuri {
 enum class RHI_API {
   Null,
   D3D11
 };
+enum class RHIFormat {
+  RGBA8_UNORM,
+  RGBA16F,
+  D24S8
+};
+enum class RHITopology {
+  TriangleList
+};
+enum class RHICull {
+  None,
+  Back,
+  Front
+};
+enum class RHIFill {
+  Solid,
+  Wireframe
+};
+using RHIBuffer = uint64_t;
+using RHIConstBuffer = uint64_t;
+using RHIVertexShader = uint64_t;
+using RHIPixelShader = uint64_t;
+using RHIInputLayout = uint64_t;
+using RHIRenderTarget = uint64_t;
+using RHISampler = uint64_t;
 struct RHIDesc {
   void* windowHandle;
   int width;
   int height;
   bool vsync;
+};
+struct RHIRasterizer {
+  RHICull cull;
+  RHIFill fill;
+  bool frontCCW;
+};
+struct RHIDepthStencil {
+  bool depthEnable;
+  bool depthWrite;
+};
+struct RHIBlend {
+  bool enable;
+};
+struct RHIViewport {
+  float x;
+  float y;
+  float w;
+  float h;
+  float minD;
+  float maxD;
 };
 class IRHI {
 public:
@@ -21,6 +66,38 @@ public:
   virtual const char* BackendName() const = 0;
   virtual int Width() const = 0;
   virtual int Height() const = 0;
+  virtual void GetCacheStats(uint64_t& total, uint64_t& discarded) const = 0;
+  virtual RHIBuffer CreateBuffer(uint64_t size, uint32_t stride, bool isIndex, const void* initialData) = 0;
+  virtual void DestroyBuffer(RHIBuffer buf) = 0;
+  virtual void SetVertexBuffer(RHIBuffer buf, uint32_t offset) = 0;
+  virtual void SetIndexBuffer(RHIBuffer buf) = 0;
+  virtual RHIConstBuffer CreateConstantBuffer(uint64_t size, const void* initialData) = 0;
+  virtual void UpdateConstantBuffer(RHIConstBuffer buf, const void* data, uint64_t size) = 0;
+  virtual void DestroyConstantBuffer(RHIConstBuffer buf) = 0;
+  virtual void SetVertexConstantBuffer(uint32_t slot, RHIConstBuffer buf) = 0;
+  virtual void SetPixelConstantBuffer(uint32_t slot, RHIConstBuffer buf) = 0;
+  virtual RHIVertexShader CreateVertexShaderFromFile(const char* path, const char* entry) = 0;
+  virtual RHIPixelShader CreatePixelShaderFromFile(const char* path, const char* entry) = 0;
+  virtual void SetVertexShader(RHIVertexShader vs) = 0;
+  virtual void SetPixelShader(RHIPixelShader ps) = 0;
+  virtual RHIInputLayout CreateInputLayoutPNU(RHIVertexShader vs) = 0;
+  virtual void SetInputLayout(RHIInputLayout layout) = 0;
+  virtual void SetViewport(const RHIViewport& vp) = 0;
+  virtual void SetTopology(RHITopology topo) = 0;
+  virtual void SetRasterizerState(const RHIRasterizer& rs) = 0;
+  virtual void SetDepthStencilState(const RHIDepthStencil& ds) = 0;
+  virtual void SetBlendState(const RHIBlend& blend) = 0;
+  virtual RHIRenderTarget CreateRenderTarget(int w, int h, RHIFormat fmt) = 0;
+  virtual void DestroyRenderTarget(RHIRenderTarget rt) = 0;
+  virtual void SetRenderTargets(uint32_t count, const RHIRenderTarget* colorRTs, RHIRenderTarget depthRT) = 0;
+  virtual void ClearRenderTarget(RHIRenderTarget rt, float r, float g, float b, float a) = 0;
+  virtual void ClearDepth(RHIRenderTarget depthRT) = 0;
+  virtual void BindBackbuffer() = 0;
+  virtual void SetPixelTexture(uint32_t slot, RHIRenderTarget rt) = 0;
+  virtual RHISampler CreateSamplerLinear() = 0;
+  virtual void SetPixelSampler(uint32_t slot, RHISampler sampler) = 0;
+  virtual void DrawIndexed(uint32_t indexCount, uint32_t startIndex, int32_t baseVertex) = 0;
+  virtual void DrawFullscreenTriangle() = 0;
 };
 IRHI* CreateRHI(RHI_API api);
 void DestroyRHI(IRHI* rhi);

@@ -4,15 +4,65 @@
 #include <windows.h>
 #include <d3d11.h>
 #include <dxgi.h>
+#include <d3dcompiler.h>
 #include <wrl/client.h>
+#include <unordered_map>
+#include <vector>
 namespace Kizuri {
 using Microsoft::WRL::ComPtr;
+namespace {
+DXGI_FORMAT ToDXGI(RHIFormat f) {
+  if (f == RHIFormat::RGBA16F) {
+    return DXGI_FORMAT_R16G16B16A16_FLOAT;
+  }
+  if (f == RHIFormat::D24S8) {
+    return DXGI_FORMAT_D24_UNORM_S8_UINT;
+  }
+  return DXGI_FORMAT_R8G8B8A8_UNORM;
+}
+struct TargetRes {
+  ComPtr<ID3D11Texture2D> tex;
+  ComPtr<ID3D11RenderTargetView> rtv;
+  ComPtr<ID3D11ShaderResourceView> srv;
+  ComPtr<ID3D11DepthStencilView> dsv;
+  int w = 0;
+  int h = 0;
+  RHIFormat fmt = RHIFormat::RGBA8_UNORM;
+  bool isDepth = false;
+};
+}
 class D3D11RHI : public IRHI {
 public:
   D3D11RHI()
     : hwnd(nullptr)
     , w(0)
-    , h(0) {
+    , h(0)
+    , nextId(1)
+    , total(0)
+    , discarded(0)
+    , curVS(0)
+    , curPS(0)
+    , curLayout(0)
+    , curVB(0)
+    , curVBOffset(0)
+    , curIB(0) {
+    curRS.cull = RHICull::Back;
+    curRS.fill = RHIFill::Solid;
+    curRS.frontCCW = false;
+    curDS.depthEnable = true;
+    curDS.depthWrite = true;
+    curBlend.enable = false;
+    curTopoD3D = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+    curVP.x = 0.0f;
+    curVP.y = 0.0f;
+    curVP.w = 0.0f;
+    curVP.h = 0.0f;
+    curVP.minD = 0.0f;
+    curVP.maxD = 1.0f;
+    hasRS = false;
+    hasDS = false;
+    hasBlend = false;
+    hasVP = false;
   }
   bool Initialize(const RHIDesc& desc) override {
     hwnd = static_cast<HWND>(desc.windowHandle);
@@ -75,16 +125,25 @@ public:
         return false;
       }
     }
-    if (!CreateTarget()) {
+    if (!CreateBackbuffer()) {
       return false;
     }
     return true;
   }
   void Shutdown() override {
+    targets.clear();
+    samplers.clear();
+    layouts.clear();
+    vsBlobs.clear();
+    vsMap.clear();
+    psMap.clear();
+    buffers.clear();
+    cbuffers.clear();
     target.Reset();
     context.Reset();
     device.Reset();
     swapchain.Reset();
+    backRTV.Reset();
     hwnd = nullptr;
     w = 0;
     h = 0;
@@ -97,22 +156,27 @@ public:
       return false;
     }
     context->OMSetRenderTargets(0, nullptr, nullptr);
-    target.Reset();
+    backRTV.Reset();
     HRESULT hr = swapchain->ResizeBuffers(1, static_cast<UINT>(nw), static_cast<UINT>(nh), DXGI_FORMAT_R8G8B8A8_UNORM, 0);
     if (FAILED(hr)) {
       return false;
     }
     w = nw;
     h = nh;
-    return CreateTarget();
+    hasRS = false;
+    hasDS = false;
+    hasBlend = false;
+    hasVP = false;
+    curRTs.clear();
+    curDepth = 0;
+    return CreateBackbuffer();
   }
   void Clear(float r, float g, float b, float a) override {
-    if (context == nullptr || target == nullptr) {
-      return;
-    }
+    BindBackbuffer();
     float c[4] = { r, g, b, a };
-    context->OMSetRenderTargets(1, target.GetAddressOf(), nullptr);
-    context->ClearRenderTargetView(target.Get(), c);
+    if (backRTV != nullptr) {
+      context->ClearRenderTargetView(backRTV.Get(), c);
+    }
   }
   void Present(bool vsync) override {
     if (swapchain == nullptr) {
@@ -129,18 +193,469 @@ public:
   int Height() const override {
     return h;
   }
-private:
-  bool CreateTarget() {
-    ComPtr<ID3D11Texture2D> back;
-    HRESULT hr = swapchain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(back.GetAddressOf()));
-    if (FAILED(hr)) {
-      return false;
+  void GetCacheStats(uint64_t& t, uint64_t& d) const override {
+    t = total;
+    d = discarded;
+  }
+  RHIBuffer CreateBuffer(uint64_t size, uint32_t stride, bool isIndex, const void* initialData) override {
+    if (size == 0 || size > 256 * 1024 * 1024) {
+      return 0;
     }
-    hr = device->CreateRenderTargetView(back.Get(), nullptr, target.GetAddressOf());
-    if (FAILED(hr)) {
-      return false;
+    D3D11_BUFFER_DESC bd;
+    bd.ByteWidth = static_cast<UINT>(size);
+    bd.Usage = D3D11_USAGE_DEFAULT;
+    bd.BindFlags = isIndex ? D3D11_BIND_INDEX_BUFFER : D3D11_BIND_VERTEX_BUFFER;
+    bd.CPUAccessFlags = 0;
+    bd.MiscFlags = 0;
+    bd.StructureByteStride = 0;
+    ComPtr<ID3D11Buffer> buf;
+    if (initialData != nullptr) {
+      D3D11_SUBRESOURCE_DATA sd;
+      sd.pSysMem = initialData;
+      sd.SysMemPitch = 0;
+      sd.SysMemSlicePitch = 0;
+      if (FAILED(device->CreateBuffer(&bd, &sd, buf.GetAddressOf()))) {
+        return 0;
+      }
+    } else {
+      if (FAILED(device->CreateBuffer(&bd, nullptr, buf.GetAddressOf()))) {
+        return 0;
+      }
     }
-    context->OMSetRenderTargets(1, target.GetAddressOf(), nullptr);
+    uint64_t id = nextId++;
+    buffers[id] = buf;
+    strides[id] = stride;
+    return id;
+  }
+  void DestroyBuffer(RHIBuffer buf) override {
+    buffers.erase(buf);
+    strides.erase(buf);
+  }
+  void SetVertexBuffer(RHIBuffer buf, uint32_t offset) override {
+    if (curVB == buf && curVBOffset == offset) {
+      Note(true);
+      return;
+    }
+    Note(false);
+    curVB = buf;
+    curVBOffset = offset;
+    auto it = buffers.find(buf);
+    if (it == buffers.end()) {
+      ID3D11Buffer* nullBuf = nullptr;
+      UINT zero = 0;
+      UINT off = offset;
+      context->IASetVertexBuffers(0, 1, &nullBuf, &zero, &off);
+      return;
+    }
+    UINT stride = strides[buf];
+    UINT off = offset;
+    ID3D11Buffer* b = it->second.Get();
+    context->IASetVertexBuffers(0, 1, &b, &stride, &off);
+  }
+  void SetIndexBuffer(RHIBuffer buf) override {
+    if (curIB == buf) {
+      Note(true);
+      return;
+    }
+    Note(false);
+    curIB = buf;
+    auto it = buffers.find(buf);
+    if (it == buffers.end()) {
+      context->IASetIndexBuffer(nullptr, DXGI_FORMAT_R32_UINT, 0);
+      return;
+    }
+    context->IASetIndexBuffer(it->second.Get(), DXGI_FORMAT_R32_UINT, 0);
+  }
+  RHIConstBuffer CreateConstantBuffer(uint64_t size, const void* initialData) override {
+    if (size == 0 || size > 65536) {
+      return 0;
+    }
+    UINT aligned = static_cast<UINT>((size + 15) & ~15ULL);
+    D3D11_BUFFER_DESC bd;
+    bd.ByteWidth = aligned;
+    bd.Usage = D3D11_USAGE_DYNAMIC;
+    bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    bd.MiscFlags = 0;
+    bd.StructureByteStride = 0;
+    ComPtr<ID3D11Buffer> buf;
+    if (initialData != nullptr) {
+      D3D11_SUBRESOURCE_DATA sd;
+      sd.pSysMem = initialData;
+      sd.SysMemPitch = 0;
+      sd.SysMemSlicePitch = 0;
+      if (FAILED(device->CreateBuffer(&bd, &sd, buf.GetAddressOf()))) {
+        return 0;
+      }
+    } else {
+      if (FAILED(device->CreateBuffer(&bd, nullptr, buf.GetAddressOf()))) {
+        return 0;
+      }
+    }
+    uint64_t id = nextId++;
+    cbuffers[id] = buf;
+    return id;
+  }
+  void UpdateConstantBuffer(RHIConstBuffer buf, const void* data, uint64_t size) override {
+    auto it = cbuffers.find(buf);
+    if (it == cbuffers.end() || data == nullptr) {
+      return;
+    }
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    if (FAILED(context->Map(it->second.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped))) {
+      return;
+    }
+    memcpy(mapped.pData, data, static_cast<size_t>(size));
+    context->Unmap(it->second.Get(), 0);
+  }
+  void DestroyConstantBuffer(RHIConstBuffer buf) override {
+    cbuffers.erase(buf);
+  }
+  void SetVertexConstantBuffer(uint32_t slot, RHIConstBuffer buf) override {
+    auto it = cbuffers.find(buf);
+    if (it == cbuffers.end()) {
+      return;
+    }
+    ID3D11Buffer* b = it->second.Get();
+    context->VSSetConstantBuffers(slot, 1, &b);
+  }
+  void SetPixelConstantBuffer(uint32_t slot, RHIConstBuffer buf) override {
+    auto it = cbuffers.find(buf);
+    if (it == cbuffers.end()) {
+      return;
+    }
+    ID3D11Buffer* b = it->second.Get();
+    context->PSSetConstantBuffers(slot, 1, &b);
+  }
+  RHIVertexShader CreateVertexShaderFromFile(const char* path, const char* entry) override {
+    ComPtr<ID3DBlob> blob;
+    if (!CompileShader(path, entry, "vs_5_0", blob)) {
+      return 0;
+    }
+    ComPtr<ID3D11VertexShader> vs;
+    if (FAILED(device->CreateVertexShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, vs.GetAddressOf()))) {
+      return 0;
+    }
+    uint64_t id = nextId++;
+    vsMap[id] = vs;
+    vsBlobs[id] = blob;
+    return id;
+  }
+  RHIPixelShader CreatePixelShaderFromFile(const char* path, const char* entry) override {
+    ComPtr<ID3DBlob> blob;
+    if (!CompileShader(path, entry, "ps_5_0", blob)) {
+      return 0;
+    }
+    ComPtr<ID3D11PixelShader> ps;
+    if (FAILED(device->CreatePixelShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, ps.GetAddressOf()))) {
+      return 0;
+    }
+    uint64_t id = nextId++;
+    psMap[id] = ps;
+    return id;
+  }
+  void SetVertexShader(RHIVertexShader vs) override {
+    if (curVS == vs) {
+      Note(true);
+      return;
+    }
+    Note(false);
+    curVS = vs;
+    auto it = vsMap.find(vs);
+    context->VSSetShader(it == vsMap.end() ? nullptr : it->second.Get(), nullptr, 0);
+  }
+  void SetPixelShader(RHIPixelShader ps) override {
+    if (curPS == ps) {
+      Note(true);
+      return;
+    }
+    Note(false);
+    curPS = ps;
+    auto it = psMap.find(ps);
+    context->PSSetShader(it == psMap.end() ? nullptr : it->second.Get(), nullptr, 0);
+  }
+  RHIInputLayout CreateInputLayoutPNU(RHIVertexShader vs) override {
+    auto it = vsBlobs.find(vs);
+    if (it == vsBlobs.end()) {
+      return 0;
+    }
+    D3D11_INPUT_ELEMENT_DESC desc[3];
+    desc[0].SemanticName = "POSITION";
+    desc[0].SemanticIndex = 0;
+    desc[0].Format = DXGI_FORMAT_R32G32B32_FLOAT;
+    desc[0].InputSlot = 0;
+    desc[0].AlignedByteOffset = 0;
+    desc[0].InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
+    desc[0].InstanceDataStepRate = 0;
+    desc[1].SemanticName = "NORMAL";
+    desc[1].SemanticIndex = 0;
+    desc[1].Format = DXGI_FORMAT_R32G32B32_FLOAT;
+    desc[1].InputSlot = 0;
+    desc[1].AlignedByteOffset = 12;
+    desc[1].InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
+    desc[1].InstanceDataStepRate = 0;
+    desc[2].SemanticName = "TEXCOORD";
+    desc[2].SemanticIndex = 0;
+    desc[2].Format = DXGI_FORMAT_R32G32_FLOAT;
+    desc[2].InputSlot = 0;
+    desc[2].AlignedByteOffset = 24;
+    desc[2].InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
+    desc[2].InstanceDataStepRate = 0;
+    ComPtr<ID3D11InputLayout> layout;
+    if (FAILED(device->CreateInputLayout(desc, 3, it->second->GetBufferPointer(), it->second->GetBufferSize(), layout.GetAddressOf()))) {
+      return 0;
+    }
+    uint64_t id = nextId++;
+    layouts[id] = layout;
+    return id;
+  }
+  void SetInputLayout(RHIInputLayout layout) override {
+    if (curLayout == layout) {
+      Note(true);
+      return;
+    }
+    Note(false);
+    curLayout = layout;
+    auto it = layouts.find(layout);
+    context->IASetInputLayout(it == layouts.end() ? nullptr : it->second.Get());
+  }
+  void SetViewport(const RHIViewport& vp) override {
+    if (hasVP && curVP.x == vp.x && curVP.y == vp.y && curVP.w == vp.w && curVP.h == vp.h && curVP.minD == vp.minD && curVP.maxD == vp.maxD) {
+      Note(true);
+      return;
+    }
+    Note(false);
+    curVP = vp;
+    hasVP = true;
+    D3D11_VIEWPORT d3dvp;
+    d3dvp.TopLeftX = vp.x;
+    d3dvp.TopLeftY = vp.y;
+    d3dvp.Width = vp.w;
+    d3dvp.Height = vp.h;
+    d3dvp.MinDepth = vp.minD;
+    d3dvp.MaxDepth = vp.maxD;
+    context->RSSetViewports(1, &d3dvp);
+  }
+  void SetTopology(RHITopology topo) override {
+    D3D11_PRIMITIVE_TOPOLOGY d3dTopo = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+    (void)topo;
+    if (curTopoD3D == d3dTopo && hasTopo) {
+      Note(true);
+      return;
+    }
+    Note(false);
+    curTopoD3D = d3dTopo;
+    hasTopo = true;
+    context->IASetPrimitiveTopology(d3dTopo);
+  }
+  void SetRasterizerState(const RHIRasterizer& rs) override {
+    if (hasRS && curRS.cull == rs.cull && curRS.fill == rs.fill && curRS.frontCCW == rs.frontCCW) {
+      Note(true);
+      return;
+    }
+    Note(false);
+    curRS = rs;
+    hasRS = true;
+    D3D11_RASTERIZER_DESC d;
+    d.FillMode = (rs.fill == RHIFill::Wireframe) ? D3D11_FILL_WIREFRAME : D3D11_FILL_SOLID;
+    if (rs.cull == RHICull::None) {
+      d.CullMode = D3D11_CULL_NONE;
+    } else if (rs.cull == RHICull::Front) {
+      d.CullMode = D3D11_CULL_FRONT;
+    } else {
+      d.CullMode = D3D11_CULL_BACK;
+    }
+    d.FrontCounterClockwise = rs.frontCCW ? TRUE : FALSE;
+    d.DepthBias = 0;
+    d.DepthBiasClamp = 0.0f;
+    d.SlopeScaledDepthBias = 0.0f;
+    d.DepthClipEnable = TRUE;
+    d.ScissorEnable = FALSE;
+    d.MultisampleEnable = FALSE;
+    d.AntialiasedLineEnable = FALSE;
+    ComPtr<ID3D11RasterizerState> state;
+    if (SUCCEEDED(device->CreateRasterizerState(&d, state.GetAddressOf()))) {
+      rsCache = state;
+      context->RSSetState(state.Get());
+    }
+  }
+  void SetDepthStencilState(const RHIDepthStencil& ds) override {
+    if (hasDS && curDS.depthEnable == ds.depthEnable && curDS.depthWrite == ds.depthWrite) {
+      Note(true);
+      return;
+    }
+    Note(false);
+    curDS = ds;
+    hasDS = true;
+    D3D11_DEPTH_STENCIL_DESC d;
+    d.DepthEnable = ds.depthEnable ? TRUE : FALSE;
+    d.DepthWriteMask = ds.depthWrite ? D3D11_DEPTH_WRITE_MASK_ALL : D3D11_DEPTH_WRITE_MASK_ZERO;
+    d.DepthFunc = D3D11_COMPARISON_LESS;
+    d.StencilEnable = FALSE;
+    d.StencilReadMask = 0xFF;
+    d.StencilWriteMask = 0xFF;
+    d.FrontFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
+    d.FrontFace.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP;
+    d.FrontFace.StencilPassOp = D3D11_STENCIL_OP_KEEP;
+    d.FrontFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
+    d.BackFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
+    d.BackFace.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP;
+    d.BackFace.StencilPassOp = D3D11_STENCIL_OP_KEEP;
+    d.BackFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
+    ComPtr<ID3D11DepthStencilState> state;
+    if (SUCCEEDED(device->CreateDepthStencilState(&d, state.GetAddressOf()))) {
+      dsCache = state;
+      context->OMSetDepthStencilState(state.Get(), 0);
+    }
+  }
+  void SetBlendState(const RHIBlend& blend) override {
+    if (hasBlend && curBlend.enable == blend.enable) {
+      Note(true);
+      return;
+    }
+    Note(false);
+    curBlend = blend;
+    hasBlend = true;
+    D3D11_BLEND_DESC d;
+    d.AlphaToCoverageEnable = FALSE;
+    d.IndependentBlendEnable = FALSE;
+    d.RenderTarget[0].BlendEnable = blend.enable ? TRUE : FALSE;
+    d.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
+    d.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+    d.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+    d.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+    d.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
+    d.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    d.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+    for (int i = 1; i < 8; ++i) {
+      d.RenderTarget[i] = d.RenderTarget[0];
+    }
+    ComPtr<ID3D11BlendState> state;
+    if (SUCCEEDED(device->CreateBlendState(&d, state.GetAddressOf()))) {
+      blendCache = state;
+      float f[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+      context->OMSetBlendState(state.Get(), f, 0xFFFFFFFF);
+    }
+  }
+  RHIRenderTarget CreateRenderTarget(int tw, int th, RHIFormat fmt) override {
+    if (tw <= 0 || th <= 0) {
+      return 0;
+    }
+    TargetRes res;
+    res.w = tw;
+    res.h = th;
+    res.fmt = fmt;
+    res.isDepth = (fmt == RHIFormat::D24S8);
+    D3D11_TEXTURE2D_DESC td;
+    td.Width = static_cast<UINT>(tw);
+    td.Height = static_cast<UINT>(th);
+    td.MipLevels = 1;
+    td.ArraySize = 1;
+    td.Format = ToDXGI(fmt);
+    td.SampleDesc.Count = 1;
+    td.SampleDesc.Quality = 0;
+    td.Usage = D3D11_USAGE_DEFAULT;
+    td.CPUAccessFlags = 0;
+    td.MiscFlags = 0;
+    if (res.isDepth) {
+      td.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+      if (FAILED(device->CreateTexture2D(&td, nullptr, res.tex.GetAddressOf()))) {
+        return 0;
+      }
+      if (FAILED(device->CreateDepthStencilView(res.tex.Get(), nullptr, res.dsv.GetAddressOf()))) {
+        return 0;
+      }
+    } else {
+      td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+      if (FAILED(device->CreateTexture2D(&td, nullptr, res.tex.GetAddressOf()))) {
+        return 0;
+      }
+      if (FAILED(device->CreateRenderTargetView(res.tex.Get(), nullptr, res.rtv.GetAddressOf()))) {
+        return 0;
+      }
+      if (FAILED(device->CreateShaderResourceView(res.tex.Get(), nullptr, res.srv.GetAddressOf()))) {
+        return 0;
+      }
+    }
+    uint64_t id = nextId++;
+    targets[id] = res;
+    return id;
+  }
+  void DestroyRenderTarget(RHIRenderTarget rt) override {
+    targets.erase(rt);
+  }
+  void SetRenderTargets(uint32_t count, const RHIRenderTarget* colorRTs, RHIRenderTarget depthRT) override {
+    bool same = (curRTs.size() == count && curDepth == depthRT);
+    if (same) {
+      for (uint32_t i = 0; i < count; ++i) {
+        if (curRTs[i] != colorRTs[i]) {
+          same = false;
+          break;
+        }
+      }
+    }
+    if (same) {
+      Note(true);
+      return;
+    }
+    Note(false);
+    curRTs.assign(colorRTs, colorRTs + count);
+    curDepth = depthRT;
+    ID3D11RenderTargetView* rtvs[4] = { nullptr, nullptr, nullptr, nullptr };
+    uint32_t n = count > 4 ? 4 : count;
+    for (uint32_t i = 0; i < n; ++i) {
+      auto it = targets.find(colorRTs[i]);
+      rtvs[i] = (it == targets.end()) ? nullptr : it->second.rtv.Get();
+    }
+    ID3D11DepthStencilView* dsv = nullptr;
+    auto dit = targets.find(depthRT);
+    if (dit != targets.end()) {
+      dsv = dit->second.dsv.Get();
+    }
+    context->OMSetRenderTargets(n, n == 0 ? nullptr : rtvs, dsv);
+    D3D11_VIEWPORT vp;
+    vp.TopLeftX = 0.0f;
+    vp.TopLeftY = 0.0f;
+    vp.Width = static_cast<FLOAT>(w);
+    vp.Height = static_cast<FLOAT>(h);
+    vp.MinDepth = 0.0f;
+    vp.MaxDepth = 1.0f;
+    if (!curRTs.empty()) {
+      auto it = targets.find(curRTs[0]);
+      if (it != targets.end()) {
+        vp.Width = static_cast<FLOAT>(it->second.w);
+        vp.Height = static_cast<FLOAT>(it->second.h);
+      }
+    }
+    context->RSSetViewports(1, &vp);
+  }
+  void ClearRenderTarget(RHIRenderTarget rt, float r, float g, float b, float a) override {
+    auto it = targets.find(rt);
+    if (it == targets.end() || it->second.rtv == nullptr) {
+      return;
+    }
+    float c[4] = { r, g, b, a };
+    context->ClearRenderTargetView(it->second.rtv.Get(), c);
+  }
+  void ClearDepth(RHIRenderTarget depthRT) override {
+    auto it = targets.find(depthRT);
+    if (it == targets.end() || it->second.dsv == nullptr) {
+      return;
+    }
+    context->ClearDepthStencilView(it->second.dsv.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
+  }
+  void BindBackbuffer() override {
+    bool same = (curRTs.size() == 1 && curRTs[0] == backId && curDepth == 0);
+    if (same) {
+      Note(true);
+      return;
+    }
+    Note(false);
+    curRTs.clear();
+    curRTs.push_back(backId);
+    curDepth = 0;
+    ID3D11RenderTargetView* rtv = backRTV.Get();
+    context->OMSetRenderTargets(1, &rtv, nullptr);
     D3D11_VIEWPORT vp;
     vp.TopLeftX = 0.0f;
     vp.TopLeftY = 0.0f;
@@ -149,15 +664,149 @@ private:
     vp.MinDepth = 0.0f;
     vp.MaxDepth = 1.0f;
     context->RSSetViewports(1, &vp);
+  }
+  void SetPixelTexture(uint32_t slot, RHIRenderTarget rt) override {
+    if (rt == 0) {
+      ID3D11ShaderResourceView* nullSrv = nullptr;
+      context->PSSetShaderResources(slot, 1, &nullSrv);
+      return;
+    }
+    auto it = targets.find(rt);
+    ID3D11ShaderResourceView* srv = (it == targets.end()) ? nullptr : it->second.srv.Get();
+    context->PSSetShaderResources(slot, 1, &srv);
+  }
+  RHISampler CreateSamplerLinear() override {
+    D3D11_SAMPLER_DESC sd;
+    sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    sd.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sd.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sd.MipLODBias = 0.0f;
+    sd.MaxAnisotropy = 1;
+    sd.ComparisonFunc = D3D11_COMPARISON_NEVER;
+    sd.BorderColor[0] = 0.0f;
+    sd.BorderColor[1] = 0.0f;
+    sd.BorderColor[2] = 0.0f;
+    sd.BorderColor[3] = 0.0f;
+    sd.MinLOD = 0.0f;
+    sd.MaxLOD = D3D11_FLOAT32_MAX;
+    ComPtr<ID3D11SamplerState> sampler;
+    if (FAILED(device->CreateSamplerState(&sd, sampler.GetAddressOf()))) {
+      return 0;
+    }
+    uint64_t id = nextId++;
+    samplers[id] = sampler;
+    return id;
+  }
+  void SetPixelSampler(uint32_t slot, RHISampler sampler) override {
+    auto it = samplers.find(sampler);
+    ID3D11SamplerState* s = (it == samplers.end()) ? nullptr : it->second.Get();
+    context->PSSetSamplers(slot, 1, &s);
+  }
+  void DrawIndexed(uint32_t indexCount, uint32_t startIndex, int32_t baseVertex) override {
+    context->DrawIndexed(indexCount, startIndex, baseVertex);
+  }
+  void DrawFullscreenTriangle() override {
+    context->IASetVertexBuffers(0, 0, nullptr, nullptr, nullptr);
+    context->IASetIndexBuffer(nullptr, DXGI_FORMAT_R32_UINT, 0);
+    context->IASetInputLayout(nullptr);
+    context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    curVB = 0;
+    curIB = 0;
+    curLayout = 0;
+    context->Draw(3, 0);
+  }
+private:
+  void Note(bool dup) {
+    ++total;
+    if (dup) {
+      ++discarded;
+    }
+  }
+  bool CreateBackbuffer() {
+    ComPtr<ID3D11Texture2D> back;
+    if (FAILED(swapchain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(back.GetAddressOf())))) {
+      return false;
+    }
+    if (FAILED(device->CreateRenderTargetView(back.Get(), nullptr, backRTV.GetAddressOf()))) {
+      return false;
+    }
+    backId = nextId++;
+    context->OMSetRenderTargets(1, backRTV.GetAddressOf(), nullptr);
+    D3D11_VIEWPORT vp;
+    vp.TopLeftX = 0.0f;
+    vp.TopLeftY = 0.0f;
+    vp.Width = static_cast<FLOAT>(w);
+    vp.Height = static_cast<FLOAT>(h);
+    vp.MinDepth = 0.0f;
+    vp.MaxDepth = 1.0f;
+    context->RSSetViewports(1, &vp);
+    curRTs.clear();
+    curRTs.push_back(backId);
+    curDepth = 0;
+    return true;
+  }
+  bool CompileShader(const char* path, const char* entry, const char* target, ComPtr<ID3DBlob>& outBlob) {
+    if (path == nullptr || entry == nullptr) {
+      return false;
+    }
+    wchar_t wpath[1024];
+    int n = MultiByteToWideChar(CP_UTF8, 0, path, -1, wpath, 1024);
+    if (n == 0) {
+      return false;
+    }
+    UINT flags = D3DCOMPILE_ENABLE_STRICTNESS;
+    ComPtr<ID3DBlob> blob;
+    ComPtr<ID3DBlob> errors;
+    HRESULT hr = D3DCompileFromFile(wpath, nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, entry, target, flags, 0, blob.GetAddressOf(), errors.GetAddressOf());
+    if (FAILED(hr)) {
+      return false;
+    }
+    outBlob = blob;
     return true;
   }
   HWND hwnd;
   int w;
   int h;
+  uint64_t nextId;
+  uint64_t total;
+  uint64_t discarded;
   ComPtr<ID3D11Device> device;
   ComPtr<ID3D11DeviceContext> context;
   ComPtr<IDXGISwapChain> swapchain;
+  ComPtr<ID3D11RenderTargetView> backRTV;
   ComPtr<ID3D11RenderTargetView> target;
+  uint64_t backId = 0;
+  std::unordered_map<uint64_t, ComPtr<ID3D11Buffer>> buffers;
+  std::unordered_map<uint64_t, uint32_t> strides;
+  std::unordered_map<uint64_t, ComPtr<ID3D11Buffer>> cbuffers;
+  std::unordered_map<uint64_t, ComPtr<ID3D11VertexShader>> vsMap;
+  std::unordered_map<uint64_t, ComPtr<ID3DBlob>> vsBlobs;
+  std::unordered_map<uint64_t, ComPtr<ID3D11PixelShader>> psMap;
+  std::unordered_map<uint64_t, ComPtr<ID3D11InputLayout>> layouts;
+  std::unordered_map<uint64_t, TargetRes> targets;
+  std::unordered_map<uint64_t, ComPtr<ID3D11SamplerState>> samplers;
+  uint64_t curVS;
+  uint64_t curPS;
+  uint64_t curLayout;
+  uint64_t curVB;
+  uint32_t curVBOffset;
+  uint64_t curIB;
+  RHIRasterizer curRS;
+  RHIDepthStencil curDS;
+  RHIBlend curBlend;
+  RHIViewport curVP;
+  D3D11_PRIMITIVE_TOPOLOGY curTopoD3D;
+  ComPtr<ID3D11RasterizerState> rsCache;
+  ComPtr<ID3D11DepthStencilState> dsCache;
+  ComPtr<ID3D11BlendState> blendCache;
+  std::vector<uint64_t> curRTs;
+  uint64_t curDepth = 0;
+  bool hasRS;
+  bool hasDS;
+  bool hasBlend;
+  bool hasVP;
+  bool hasTopo = false;
 };
 IRHI* CreateD3D11RHI() {
   return new D3D11RHI();

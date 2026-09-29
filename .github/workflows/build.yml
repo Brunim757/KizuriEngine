@@ -20,5 +20,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: KizuriEngine-windows-x64
-          path: build/bin/Release/*.exe
+          path: build/bin/Release/
           if-no-files-found: error
