@@ -95,9 +95,9 @@ add_library(kizuri_imgui STATIC
 )
 target_include_directories(kizuri_imgui PUBLIC ${imgui_SOURCE_DIR})
 add_library(kizuri_imguizmo STATIC
-  ${imguizmo_SOURCE_DIR}/ImGuizmo.cpp
+  ${imguizmo_SOURCE_DIR}/src/ImGuizmo.cpp
 )
-target_include_directories(kizuri_imguizmo PUBLIC ${imguizmo_SOURCE_DIR})
+target_include_directories(kizuri_imguizmo PUBLIC ${imguizmo_SOURCE_DIR}/src)
 target_link_libraries(kizuri_imguizmo PUBLIC kizuri_imgui)
 add_library(kizuri_cgltf STATIC
   ${CMAKE_CURRENT_SOURCE_DIR}/ThirdParty/cgltf_impl.cpp
