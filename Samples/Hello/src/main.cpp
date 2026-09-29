@@ -344,6 +344,7 @@ bool TestDeferredNull() {  Kizuri::IRHI* rhi = Kizuri::CreateRHI(Kizuri::RHI_API
     }
   }
   if (!rok) {
+    renderer.Shutdown();
     rhi->Shutdown();
     Kizuri::DestroyRHI(rhi);
     return false;
@@ -353,6 +354,7 @@ bool TestDeferredNull() {  Kizuri::IRHI* rhi = Kizuri::CreateRHI(Kizuri::RHI_API
   float uv[6] = { 0.0f, 0.0f, 1.0f, 0.0f, 0.5f, 1.0f };
   uint32_t idx[3] = { 0, 1, 2 };
   if (!renderer.SetMesh(tri, nrm, uv, 3, idx, 3)) {
+    renderer.Shutdown();
     rhi->Shutdown();
     Kizuri::DestroyRHI(rhi);
     return false;
@@ -362,16 +364,19 @@ bool TestDeferredNull() {  Kizuri::IRHI* rhi = Kizuri::CreateRHI(Kizuri::RHI_API
   float cam[3] = { 0, 0, -5 };
   renderer.Render(view, proj, cam);
   if (!renderer.IsReady()) {
+    renderer.Shutdown();
     rhi->Shutdown();
     Kizuri::DestroyRHI(rhi);
     return false;
   }
   if (!renderer.Resize(160, 100)) {
+    renderer.Shutdown();
     rhi->Shutdown();
     Kizuri::DestroyRHI(rhi);
     return false;
   }
   renderer.Render(view, proj, cam);
+  renderer.Shutdown();
   rhi->Shutdown();
   Kizuri::DestroyRHI(rhi);
   return true;
