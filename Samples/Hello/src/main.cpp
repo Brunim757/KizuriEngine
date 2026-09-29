@@ -20,6 +20,7 @@
 namespace {
 int Check(const char* name, bool ok) {
   std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", name);
+  std::fflush(stdout);
   return ok ? 0 : 1;
 }
 struct AddTask : public enki::ITaskSet {
@@ -377,6 +378,7 @@ bool TestDeferredNull() {  Kizuri::IRHI* rhi = Kizuri::CreateRHI(Kizuri::RHI_API
 }
 }
 int main() {
+  std::setvbuf(stdout, nullptr, _IONBF, 0);
   std::printf("KizuriHello %s\n", Kizuri::Core_Version());
   int failures = 0;
   failures += Check("DirectXMath", Kizuri::Core_TestDirectXMath());
