@@ -42,6 +42,7 @@ struct EditorApp {
   int rdownY;
   bool rdownValid;
   EntityId contextPick;
+  bool gizmoHotLast;
   char renameBuf[128];
   bool renameActive;
   EntityId renameTarget;
