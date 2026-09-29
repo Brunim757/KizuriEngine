@@ -1,0 +1,261 @@
+#include "Kizuri/SceneSerializer.h"
+#include "Kizuri/Reflection.h"
+#include "Kizuri/Log.h"
+#include <cstdio>
+#include <cstring>
+#include <unordered_map>
+namespace Kizuri {
+namespace {
+std::string EscapeName(const std::string& name) {
+  std::string out;
+  for (size_t i = 0; i < name.size(); ++i) {
+    char c = name[i];
+    if (c == '\\' || c == '"') {
+      out.push_back('\\');
+    }
+    out.push_back(c);
+  }
+  return out;
+}
+bool UnescapeName(const std::string& in, std::string& out) {
+  out.clear();
+  for (size_t i = 0; i < in.size(); ++i) {
+    char c = in[i];
+    if (c == '\\') {
+      ++i;
+      if (i >= in.size()) {
+        return false;
+      }
+      out.push_back(in[i]);
+    } else {
+      out.push_back(c);
+    }
+  }
+  return true;
+}
+bool ParseQuoted(const std::string& line, size_t& pos, std::string& out) {
+  while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) {
+    ++pos;
+  }
+  if (pos >= line.size() || line[pos] != '"') {
+    return false;
+  }
+  ++pos;
+  std::string raw;
+  while (pos < line.size() && line[pos] != '"') {
+    if (line[pos] == '\\') {
+      raw.push_back('\\');
+      ++pos;
+      if (pos >= line.size()) {
+        return false;
+      }
+    }
+    raw.push_back(line[pos]);
+    ++pos;
+  }
+  if (pos >= line.size()) {
+    return false;
+  }
+  ++pos;
+  return UnescapeName(raw, out);
+}
+bool ParseFloats(const std::string& line, size_t& pos, float* out, int count) {
+  for (int i = 0; i < count; ++i) {
+    while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) {
+      ++pos;
+    }
+    if (pos >= line.size()) {
+      return false;
+    }
+    int consumed = 0;
+    if (std::sscanf(line.c_str() + pos, "%g%n", &out[i], &consumed) != 1 || consumed <= 0) {
+      return false;
+    }
+    pos += static_cast<size_t>(consumed);
+  }
+  return true;
+}
+bool ParseInt(const std::string& line, size_t& pos, long& out) {
+  while (pos < line.size() && (line[pos] == ' ' || line[pos] == '\t')) {
+    ++pos;
+  }
+  if (pos >= line.size()) {
+    return false;
+  }
+  int consumed = 0;
+  if (std::sscanf(line.c_str() + pos, "%ld%n", &out, &consumed) != 1 || consumed <= 0) {
+    return false;
+  }
+  pos += static_cast<size_t>(consumed);
+  return true;
+}
+}
+bool SaveSceneToFile(const Scene& scene, const std::string& path) {
+  RegisterCoreTypes();
+  const StructDesc* tdesc = TypeRegistry::Instance().Find("Transform");
+  if (tdesc == nullptr) {
+    return false;
+  }
+  FILE* fp = std::fopen(path.c_str(), "wb");
+  if (fp == nullptr) {
+    return false;
+  }
+  std::fprintf(fp, "KZSCENE 1\n");
+  std::vector<EntityId> all = scene.All();
+  std::unordered_map<uint32_t, long> indexOf;
+  for (long i = 0; i < static_cast<long>(all.size()); ++i) {
+    indexOf[all[i].index] = i;
+  }
+  for (size_t i = 0; i < all.size(); ++i) {
+    const Entity* e = scene.Get(all[i]);
+    if (e == nullptr) {
+      continue;
+    }
+    long parentIdx = -1;
+    if (e->parent.IsValid()) {
+      auto it = indexOf.find(e->parent.index);
+      if (it != indexOf.end()) {
+        const Entity* p = scene.Get(e->parent);
+        if (p != nullptr && p->id == e->parent) {
+          parentIdx = it->second;
+        }
+      }
+    }
+    std::fprintf(fp, "ENTITY \"%s\" %ld\n", EscapeName(e->name).c_str(), parentIdx);
+    const unsigned char* base = reinterpret_cast<const unsigned char*>(&e->transform);
+    for (size_t f = 0; f < tdesc->fields.size(); ++f) {
+      const FieldDesc& fd = tdesc->fields[f];
+      if (fd.kind == FieldKind::Float3) {
+        const float* v = reinterpret_cast<const float*>(base + fd.offset);
+        std::fprintf(fp, "%s %.9g %.9g %.9g\n", fd.name.c_str(), v[0], v[1], v[2]);
+      } else if (fd.kind == FieldKind::Float) {
+        const float* v = reinterpret_cast<const float*>(base + fd.offset);
+        std::fprintf(fp, "%s %.9g\n", fd.name.c_str(), v[0]);
+      }
+    }
+  }
+  std::fclose(fp);
+  return true;
+}
+bool LoadSceneFromFile(Scene& scene, const std::string& path, LogStore* log) {
+  RegisterCoreTypes();
+  const StructDesc* tdesc = TypeRegistry::Instance().Find("Transform");
+  if (tdesc == nullptr) {
+    return false;
+  }
+  FILE* fp = std::fopen(path.c_str(), "rb");
+  if (fp == nullptr) {
+    if (log != nullptr) {
+      log->Add(LogLevel::Error, std::string("Cannot open scene file: ") + path);
+    }
+    return false;
+  }
+  char line[1024];
+  if (std::fgets(line, sizeof(line), fp) == nullptr) {
+    std::fclose(fp);
+    return false;
+  }
+  if (std::strncmp(line, "KZSCENE 1", 9) != 0) {
+    std::fclose(fp);
+    if (log != nullptr) {
+      log->Add(LogLevel::Error, "Bad scene header");
+    }
+    return false;
+  }
+  struct PendingEntity {
+    std::string name;
+    long parentIdx;
+    Transform transform;
+  };
+  std::vector<PendingEntity> pending;
+  PendingEntity* current = nullptr;
+  bool failed = false;
+  while (std::fgets(line, sizeof(line), fp) != nullptr && !failed) {
+    std::string s(line);
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) {
+      s.pop_back();
+    }
+    if (s.empty()) {
+      continue;
+    }
+    if (s.compare(0, 7, "ENTITY ") == 0) {
+      PendingEntity pe;
+      MakeIdentityTransform(pe.transform);
+      pe.parentIdx = -1;
+      size_t pos = 7;
+      if (!ParseQuoted(s, pos, pe.name) || pe.name.empty()) {
+        failed = true;
+        break;
+      }
+      if (!ParseInt(s, pos, pe.parentIdx)) {
+        failed = true;
+        break;
+      }
+      pending.push_back(pe);
+      current = &pending.back();
+    } else if (current != nullptr) {
+      size_t sp = s.find(' ');
+      std::string field = (sp == std::string::npos) ? s : s.substr(0, sp);
+      const FieldDesc* fd = nullptr;
+      for (size_t f = 0; f < tdesc->fields.size(); ++f) {
+        if (tdesc->fields[f].name == field) {
+          fd = &tdesc->fields[f];
+          break;
+        }
+      }
+      if (fd == nullptr) {
+        continue;
+      }
+      size_t pos = (sp == std::string::npos) ? s.size() : sp + 1;
+      unsigned char* base = reinterpret_cast<unsigned char*>(&current->transform);
+      if (fd->kind == FieldKind::Float3) {
+        float v[3] = { 0, 0, 0 };
+        if (!ParseFloats(s, pos, v, 3)) {
+          failed = true;
+          break;
+        }
+        float* dst = reinterpret_cast<float*>(base + fd->offset);
+        dst[0] = v[0];
+        dst[1] = v[1];
+        dst[2] = v[2];
+      } else if (fd->kind == FieldKind::Float) {
+        float v[1] = { 0 };
+        if (!ParseFloats(s, pos, v, 1)) {
+          failed = true;
+          break;
+        }
+        float* dst = reinterpret_cast<float*>(base + fd->offset);
+        dst[0] = v[0];
+      }
+    } else {
+      failed = true;
+      break;
+    }
+  }
+  std::fclose(fp);
+  if (failed) {
+    if (log != nullptr) {
+      log->Add(LogLevel::Error, "Scene file is corrupt");
+    }
+    return false;
+  }
+  scene.Clear();
+  std::vector<EntityId> created;
+  for (size_t i = 0; i < pending.size(); ++i) {
+    EntityId id = scene.CreateEntity(pending[i].name);
+    if (!id.IsValid()) {
+      scene.Clear();
+      return false;
+    }
+    scene.SetTransform(id, pending[i].transform);
+    created.push_back(id);
+  }
+  for (size_t i = 0; i < pending.size(); ++i) {
+    if (pending[i].parentIdx >= 0 && pending[i].parentIdx < static_cast<long>(created.size())) {
+      scene.SetParent(created[i], created[static_cast<size_t>(pending[i].parentIdx)]);
+    }
+  }
+  scene.ClearDirty();
+  return true;
+}
+}

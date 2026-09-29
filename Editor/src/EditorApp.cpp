@@ -2,6 +2,8 @@
 #define WIN32_LEAN_AND_MEAN
 #include "EditorApp.h"
 #include "Kizuri/Input.h"
+#include "Kizuri/SceneSerializer.h"
+#include "FileDialog.h"
 #include <windows.h>
 #include <imgui.h>
 #include <imgui_impl_win32.h>
@@ -37,7 +39,9 @@ EditorApp::EditorApp()
   , contextPick(EntityId::Invalid())
   , gizmoHotLast(false)
   , renameActive(false)
-  , renameTarget(EntityId::Invalid()) {
+  , renameTarget(EntityId::Invalid())
+  , titleDirtyShown(false)
+  , pendingAction(0) {
   renameBuf[0] = '\0';
 }
 std::string EditorApp::FindShaderDir() {
@@ -231,18 +235,36 @@ void EditorApp::Frame() {
     ImGui::Text("ImGui + ImGuizmo + Deferred PBR");
     ImGui::End();
   }
+  RefreshTitle();
+  DrawSavePrompt();
 }
 void EditorApp::DrawMenuBar() {
   if (ImGui::BeginMainMenuBar()) {
     if (ImGui::BeginMenu("File")) {
       if (ImGui::MenuItem("New Scene")) {
-        scene.Clear();
-        selection.Clear();
-        edits.Clear();
-        log.Add(LogLevel::Warning, "Scene cleared");
+        RequestAction(1);
+      }
+      if (ImGui::MenuItem("Open...")) {
+        RequestAction(2);
+      }
+      if (ImGui::MenuItem("Save")) {
+        if (currentPath.empty()) {
+          std::string path;
+          if (ShowSaveSceneDialog(window.NativeHandle(), path)) {
+            DoSaveTo(path);
+          }
+        } else {
+          DoSaveTo(currentPath);
+        }
+      }
+      if (ImGui::MenuItem("Save As...")) {
+        std::string path = currentPath;
+        if (ShowSaveSceneDialog(window.NativeHandle(), path)) {
+          DoSaveTo(path);
+        }
       }
       if (ImGui::MenuItem("Exit")) {
-        running = false;
+        RequestAction(3);
       }
       ImGui::EndMenu();
     }
@@ -260,6 +282,105 @@ void EditorApp::DrawMenuBar() {
       ImGui::EndMenu();
     }
     ImGui::EndMainMenuBar();
+  }
+}
+void EditorApp::RefreshTitle() {
+  bool dirty = scene.IsDirty();
+  if (dirty == titleDirtyShown && currentPath == titlePathShown) {
+    return;
+  }
+  titleDirtyShown = dirty;
+  titlePathShown = currentPath;
+  std::string name = currentPath.empty() ? "Untitled" : currentPath;
+  size_t slash = name.find_last_of("/\\");
+  if (slash != std::string::npos) {
+    name = name.substr(slash + 1);
+  }
+  if (dirty) {
+    name += "*";
+  }
+  std::string title = "Kizuri Editor - " + name;
+  wchar_t wide[1024];
+  int n = MultiByteToWideChar(CP_UTF8, 0, title.c_str(), -1, wide, 1023);
+  if (n <= 0) {
+    return;
+  }
+  wide[1023] = L'\0';
+  SetWindowTextW(static_cast<HWND>(window.NativeHandle()), wide);
+}
+void EditorApp::RequestAction(int action) {
+  if (scene.IsDirty()) {
+    pendingAction = action;
+    ImGui::OpenPopup("Unsaved Changes");
+    return;
+  }
+  pendingAction = action;
+  RunPendingAction();
+}
+void EditorApp::RunPendingAction() {
+  int action = pendingAction;
+  pendingAction = 0;
+  if (action == 1) {
+    DoNewScene();
+  } else if (action == 2) {
+    std::string path;
+    if (ShowOpenSceneDialog(window.NativeHandle(), path)) {
+      DoOpenPath(path);
+    }
+  } else if (action == 3) {
+    running = false;
+  }
+}
+void EditorApp::DoNewScene() {
+  scene.Clear();
+  selection.Clear();
+  edits.Clear();
+  currentPath.clear();
+  log.Add(LogLevel::Warning, "Scene cleared");
+}
+void EditorApp::DoSaveTo(const std::string& path) {
+  if (SaveSceneToFile(scene, path)) {
+    currentPath = path;
+    scene.ClearDirty();
+    log.Add(LogLevel::Success, std::string("Scene saved: ") + path);
+  } else {
+    log.Add(LogLevel::Error, std::string("Scene save failed: ") + path);
+  }
+}
+void EditorApp::DoOpenPath(const std::string& path) {
+  if (LoadSceneFromFile(scene, path, &log)) {
+    currentPath = path;
+    selection.Clear();
+    edits.Clear();
+    log.Add(LogLevel::Success, std::string("Scene opened: ") + path);
+  }
+}
+void EditorApp::DrawSavePrompt() {
+  if (ImGui::BeginPopupModal("Unsaved Changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::Text("Save changes before continuing?");
+    if (ImGui::Button("Save")) {
+      std::string path = currentPath;
+      bool picked = !path.empty();
+      if (path.empty()) {
+        picked = ShowSaveSceneDialog(window.NativeHandle(), path);
+      }
+      if (picked) {
+        DoSaveTo(path);
+        ImGui::CloseCurrentPopup();
+        RunPendingAction();
+      }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Don't Save")) {
+      ImGui::CloseCurrentPopup();
+      RunPendingAction();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel")) {
+      pendingAction = 0;
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
   }
 }
 }

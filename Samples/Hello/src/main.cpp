@@ -17,6 +17,8 @@
 #include "Kizuri/Log.h"
 #include "Kizuri/EditQueue.h"
 #include "Kizuri/Picking.h"
+#include "Kizuri/Reflection.h"
+#include "Kizuri/SceneSerializer.h"
 #include <DirectXMath.h>
 #include <TaskScheduler.h>
 #include <cstdio>
@@ -653,6 +655,112 @@ bool TestPicking() {
   }
   return true;
 }
+bool TestSceneRoundTrip() {
+  Kizuri::Scene src;
+  Kizuri::EntityId root = src.CreateEntity("Root Node");
+  Kizuri::EntityId child = src.CreateEntity("Child \"Quoted\" \\ Test");
+  Kizuri::EntityId lone = src.CreateEntity("Lone");
+  Kizuri::Transform t;
+  Kizuri::MakeIdentityTransform(t);
+  t.position[0] = 1.5f;
+  t.position[1] = -2.25f;
+  t.position[2] = 100.125f;
+  t.rotation[0] = 30.0f;
+  t.rotation[1] = 45.5f;
+  t.rotation[2] = -10.0f;
+  t.scale[0] = 2.0f;
+  t.scale[1] = 0.5f;
+  t.scale[2] = 1.0f;
+  src.SetTransform(root, t);
+  Kizuri::Transform tc;
+  Kizuri::MakeIdentityTransform(tc);
+  tc.position[2] = 7.0f;
+  src.SetTransform(child, tc);
+  src.SetParent(child, root);
+  const char* path = "test_scene_tmp.kzscene";
+  std::remove(path);
+  if (!Kizuri::SaveSceneToFile(src, path)) {
+    return false;
+  }
+  Kizuri::Scene dst;
+  if (!Kizuri::LoadSceneFromFile(dst, path, nullptr)) {
+    std::remove(path);
+    return false;
+  }
+  std::remove(path);
+  if (dst.Count() != 3 || dst.IsDirty()) {
+    return false;
+  }
+  const Kizuri::Entity* dr = nullptr;
+  const Kizuri::Entity* dc = nullptr;
+  const Kizuri::Entity* dl = nullptr;
+  std::vector<Kizuri::EntityId> all = dst.All();
+  for (size_t i = 0; i < all.size(); ++i) {
+    const Kizuri::Entity* e = dst.Get(all[i]);
+    if (e->name == "Root Node") {
+      dr = e;
+    } else if (e->name == "Child \"Quoted\" \\ Test") {
+      dc = e;
+    } else if (e->name == "Lone") {
+      dl = e;
+    }
+  }
+  if (dr == nullptr || dc == nullptr || dl == nullptr) {
+    return false;
+  }
+  if (dr->transform.position[0] != 1.5f || dr->transform.position[1] != -2.25f || dr->transform.position[2] != 100.125f) {
+    return false;
+  }
+  if (dr->transform.rotation[1] != 45.5f || dr->transform.scale[0] != 2.0f) {
+    return false;
+  }
+  if (dc->transform.position[2] != 7.0f) {
+    return false;
+  }
+  if (!dc->parent.IsValid()) {
+    return false;
+  }
+  const Kizuri::Entity* dp = dst.Get(dc->parent);
+  if (dp == nullptr || dp->name != "Root Node") {
+    return false;
+  }
+  if (dl->parent.IsValid()) {
+    return false;
+  }
+  if (Kizuri::TypeRegistry::Instance().Find("Transform") == nullptr) {
+    return false;
+  }
+  (void)lone;
+  return true;
+}
+bool TestSceneInvalid() {
+  Kizuri::Scene scene;
+  if (Kizuri::LoadSceneFromFile(scene, "no_such_file_xyz.kzscene", nullptr)) {
+    return false;
+  }
+  const char* bad = "test_scene_bad_tmp.kzscene";
+  FILE* fp = std::fopen(bad, "wb");
+  if (fp == nullptr) {
+    return false;
+  }
+  std::fputs("NOT A SCENE\nGARBAGE {{{{\n", fp);
+  std::fclose(fp);
+  bool ok = !Kizuri::LoadSceneFromFile(scene, bad, nullptr);
+  std::remove(bad);
+  if (!ok) {
+    return false;
+  }
+  const char* bad2 = "test_scene_bad2_tmp.kzscene";
+  fp = std::fopen(bad2, "wb");
+  if (fp == nullptr) {
+    return false;
+  }
+  std::fputs("KZSCENE 1\nENTITY \"Broken\" notanumber\n", fp);
+  std::fclose(fp);
+  ok = !Kizuri::LoadSceneFromFile(scene, bad2, nullptr);
+  std::remove(bad2);
+  return ok;
+}
 }
 int main() {
   std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -688,6 +796,8 @@ int main() {
   failures += Check("LogStore", TestLog());
   failures += Check("EditQueue", TestEditQueue());
   failures += Check("Picking", TestPicking());
+  failures += Check("Scene-RoundTrip", TestSceneRoundTrip());
+  failures += Check("Scene-InvalidFile", TestSceneInvalid());
   if (failures == 0) {
     std::printf("KizuriHello: all bootstrap libs linked and functional\n");
   } else {

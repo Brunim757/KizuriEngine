@@ -46,6 +46,10 @@ struct EditorApp {
   char renameBuf[128];
   bool renameActive;
   EntityId renameTarget;
+  std::string currentPath;
+  bool titleDirtyShown;
+  std::string titlePathShown;
+  int pendingAction;
   EditorApp();
   bool Initialize();
   int Run();
@@ -61,6 +65,13 @@ struct EditorApp {
   void HandleViewportClick();
   void CreateEntityAt(float x, float y, float z);
   void FocusEntity(EntityId id);
+  void RefreshTitle();
+  void RequestAction(int action);
+  void RunPendingAction();
+  void DoSaveTo(const std::string& path);
+  void DoOpenPath(const std::string& path);
+  void DoNewScene();
+  void DrawSavePrompt();
   std::string FindAsset(const char* name);
   std::string FindShaderDir();
 };
