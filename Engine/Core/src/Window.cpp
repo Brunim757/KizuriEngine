@@ -62,12 +62,12 @@ bool Window::Create(const wchar_t* title, int w, int h) {
   wc.cbClsExtra = 0;
   wc.cbWndExtra = 0;
   wc.hInstance = hInst;
-  wc.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
-  wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+  wc.hIcon = LoadIconW(nullptr, reinterpret_cast<LPCWSTR>(IDI_APPLICATION));
+  wc.hCursor = LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_ARROW));
   wc.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
   wc.lpszMenuName = nullptr;
   wc.lpszClassName = kClassName;
-  wc.hIconSm = LoadIconW(nullptr, IDI_APPLICATION);
+  wc.hIconSm = LoadIconW(nullptr, reinterpret_cast<LPCWSTR>(IDI_APPLICATION));
   RegisterClassExW(&wc);
   DWORD style = WS_OVERLAPPEDWINDOW;
   RECT rc;
