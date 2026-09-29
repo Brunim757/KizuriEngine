@@ -27,6 +27,7 @@ DeferredRenderer::DeferredRenderer()
   , gMetallic(0)
   , gPosition(0)
   , gDepth(0)
+  , gViewport(0)
   , vb(0)
   , ib(0)
   , geoCB(0)
@@ -194,6 +195,18 @@ void DeferredRenderer::SetViewOffset(float x, float y) {
   viewY = y;
 }
 void DeferredRenderer::Render(const float view[16], const float proj[16], const float camPos[3]) {
+  RenderInternal(view, proj, camPos, false);
+}
+void DeferredRenderer::RenderToTexture(const float view[16], const float proj[16], const float camPos[3]) {
+  RenderInternal(view, proj, camPos, true);
+}
+void* DeferredRenderer::GetViewportTexture() {
+  if (rhi == nullptr || gViewport == 0) {
+    return nullptr;
+  }
+  return rhi->GetRenderTargetSRV(gViewport);
+}
+void DeferredRenderer::RenderInternal(const float view[16], const float proj[16], const float camPos[3], bool toTexture) {
   if (!ready || rhi == nullptr || vb == 0 || ib == 0) {
     return;
   }
@@ -251,7 +264,11 @@ void DeferredRenderer::Render(const float view[16], const float proj[16], const 
   rhi->UpdateConstantBuffer(matCB, &mc, sizeof(mc));
   rhi->SetPixelConstantBuffer(0, matCB);
   rhi->DrawIndexed(indexCount, 0, 0);
-  rhi->BindBackbuffer();
+  if (toTexture) {
+    rhi->SetRenderTargets(1, &gViewport, 0);
+  } else {
+    rhi->BindBackbuffer();
+  }
   RHIViewport lvp;
   lvp.x = viewX;
   lvp.y = viewY;
@@ -291,6 +308,9 @@ void DeferredRenderer::Render(const float view[16], const float proj[16], const 
   rhi->SetPixelTexture(1, 0);
   rhi->SetPixelTexture(2, 0);
   rhi->SetPixelTexture(3, 0);
+  if (toTexture) {
+    rhi->BindBackbuffer();
+  }
 }
 bool DeferredRenderer::IsReady() const {
   return ready;
@@ -304,7 +324,8 @@ bool DeferredRenderer::CreateTargets() {
   gMetallic = rhi->CreateRenderTarget(w, h, RHIFormat::RGBA8_UNORM);
   gPosition = rhi->CreateRenderTarget(w, h, RHIFormat::RGBA16F);
   gDepth = rhi->CreateRenderTarget(w, h, RHIFormat::D24S8);
-  return gAlbedo != 0 && gNormalRough != 0 && gMetallic != 0 && gPosition != 0 && gDepth != 0;
+  gViewport = rhi->CreateRenderTarget(w, h, RHIFormat::RGBA8_UNORM);
+  return gAlbedo != 0 && gNormalRough != 0 && gMetallic != 0 && gPosition != 0 && gDepth != 0 && gViewport != 0;
 }
 void DeferredRenderer::DestroyTargets() {
   if (rhi == nullptr) {
@@ -329,6 +350,10 @@ void DeferredRenderer::DestroyTargets() {
   if (gDepth != 0) {
     rhi->DestroyRenderTarget(gDepth);
     gDepth = 0;
+  }
+  if (gViewport != 0) {
+    rhi->DestroyRenderTarget(gViewport);
+    gViewport = 0;
   }
 }
 }

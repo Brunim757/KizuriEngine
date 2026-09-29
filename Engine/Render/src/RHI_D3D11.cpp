@@ -650,6 +650,13 @@ public:
     }
     context->ClearDepthStencilView(it->second.dsv.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
   }
+  void* GetRenderTargetSRV(RHIRenderTarget rt) const override {
+    auto it = targets.find(rt);
+    if (it == targets.end()) {
+      return nullptr;
+    }
+    return it->second.srv.Get();
+  }
   void BindBackbuffer() override {
     bool same = (curRTs.size() == 1 && curRTs[0] == backId && curDepth == 0);
     if (same) {

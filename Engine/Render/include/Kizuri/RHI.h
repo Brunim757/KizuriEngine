@@ -94,6 +94,7 @@ public:
   virtual void SetRenderTargets(uint32_t count, const RHIRenderTarget* colorRTs, RHIRenderTarget depthRT) = 0;
   virtual void ClearRenderTarget(RHIRenderTarget rt, float r, float g, float b, float a) = 0;
   virtual void ClearDepth(RHIRenderTarget depthRT) = 0;
+  virtual void* GetRenderTargetSRV(RHIRenderTarget rt) const = 0;
   virtual void BindBackbuffer() = 0;
   virtual void SetPixelTexture(uint32_t slot, RHIRenderTarget rt) = 0;
   virtual RHISampler CreateSamplerLinear() = 0;

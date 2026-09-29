@@ -261,6 +261,10 @@ public:
   void ClearDepth(RHIRenderTarget depthRT) override {
     (void)depthRT;
   }
+  void* GetRenderTargetSRV(RHIRenderTarget rt) const override {
+    (void)rt;
+    return nullptr;
+  }
   void BindBackbuffer() override {
     Note(false);
   }

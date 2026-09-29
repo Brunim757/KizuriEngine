@@ -32,7 +32,7 @@ void EditorApp::RenderScene() {
     lastRTW = rw;
     lastRTH = rh;
   }
-  renderer.SetViewOffset(viewX, viewY);
+  renderer.SetViewOffset(0.0f, 0.0f);
   DirectX::XMMATRIX view = camera.View();
   float aspect = viewW / viewH;
   DirectX::XMMATRIX proj = camera.Projection(aspect);
@@ -45,7 +45,8 @@ void EditorApp::RenderScene() {
   float cpz = 0.0f;
   camera.GetPosition(cpx, cpy, cpz);
   float cpos[3] = { cpx, cpy, cpz };
-  renderer.Render(&vf.m[0][0], &pf.m[0][0], cpos);
+  renderer.RenderToTexture(&vf.m[0][0], &pf.m[0][0], cpos);
+  rhi->Clear(0.03f, 0.03f, 0.04f, 1.0f);
 }
 void EditorApp::HandleViewportClick() {
   DirectX::XMMATRIX view = camera.View();
@@ -67,18 +68,24 @@ void EditorApp::HandleViewportClick() {
   }
 }
 void EditorApp::DrawViewport() {
-  ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
   ImGui::Begin("Viewport", &showViewport);
-  ImVec2 rmin = ImGui::GetWindowContentRegionMin();
-  ImVec2 rmax = ImGui::GetWindowContentRegionMax();
-  ImVec2 wpos = ImGui::GetWindowPos();
-  viewX = wpos.x + rmin.x;
-  viewY = wpos.y + rmin.y;
-  viewW = rmax.x - rmin.x;
-  viewH = rmax.y - rmin.y;
-  viewValid = viewW > 8.0f && viewH > 8.0f;
   ImVec2 avail = ImGui::GetContentRegionAvail();
-  ImGui::InvisibleButton("ViewCanvas", avail);
+  float iw = avail.x > 8.0f ? avail.x : 8.0f;
+  float ih = avail.y > 8.0f ? avail.y : 8.0f;
+  ImVec2 ipos = ImGui::GetCursorScreenPos();
+  viewX = ipos.x;
+  viewY = ipos.y;
+  viewW = iw;
+  viewH = ih;
+  viewValid = true;
+  void* tex = renderer.IsReady() ? renderer.GetViewportTexture() : nullptr;
+  if (tex != nullptr) {
+    ImGui::Image(static_cast<ImTextureID>(tex), ImVec2(iw, ih));
+  } else {
+    ImGui::Dummy(ImVec2(iw, ih));
+  }
+  ImGui::SetCursorScreenPos(ipos);
+  ImGui::InvisibleButton("ViewCanvas", ImVec2(iw, ih));
   bool canvasHovered = ImGui::IsItemHovered();
   if (ImGui::BeginDragDropTarget()) {
     const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("KZ_MESH");
@@ -214,7 +221,6 @@ void EditorApp::DrawViewport() {
     }
   }
   ImGui::End();
-  ImGui::PopStyleColor();
 }
 void EditorApp::DrawHierarchy() {
   ImGui::Begin("Hierarchy", &showHierarchy);

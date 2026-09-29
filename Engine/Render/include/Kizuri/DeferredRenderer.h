@@ -25,6 +25,8 @@ public:
   bool Resize(int w, int h);
   void SetViewOffset(float x, float y);
   void Render(const float view[16], const float proj[16], const float camPos[3]);
+  void RenderToTexture(const float view[16], const float proj[16], const float camPos[3]);
+  void* GetViewportTexture();
   bool IsReady() const;
 private:
   IRHI* rhi;
@@ -35,6 +37,7 @@ private:
   RHIRenderTarget gMetallic;
   RHIRenderTarget gPosition;
   RHIRenderTarget gDepth;
+  RHIRenderTarget gViewport;
   RHIBuffer vb;
   RHIBuffer ib;
   RHIConstBuffer geoCB;
@@ -54,6 +57,7 @@ private:
   DeferredLight light;
   bool CreateTargets();
   void DestroyTargets();
+  void RenderInternal(const float view[16], const float proj[16], const float camPos[3], bool toTexture);
   DeferredRenderer(const DeferredRenderer&) = delete;
   DeferredRenderer& operator=(const DeferredRenderer&) = delete;
 };

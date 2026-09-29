@@ -381,6 +381,14 @@ bool TestDeferredNull() {  Kizuri::IRHI* rhi = Kizuri::CreateRHI(Kizuri::RHI_API
     return false;
   }
   renderer.Render(view, proj, cam);
+  renderer.RenderToTexture(view, proj, cam);
+  void* srv = renderer.GetViewportTexture();
+  if (srv != nullptr) {
+    renderer.Shutdown();
+    rhi->Shutdown();
+    Kizuri::DestroyRHI(rhi);
+    return false;
+  }
   renderer.Shutdown();
   rhi->Shutdown();
   Kizuri::DestroyRHI(rhi);
