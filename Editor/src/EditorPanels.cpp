@@ -80,6 +80,29 @@ void EditorApp::HandleViewportClick() {
 }
 void EditorApp::DrawViewport() {
   ImGui::Begin("Viewport", &showViewport);
+  ImGuizmo::OPERATION curOp = static_cast<ImGuizmo::OPERATION>(gizmoOp);
+  if (ImGui::RadioButton("Move", curOp == ImGuizmo::TRANSLATE)) {
+    gizmoOp = static_cast<int>(ImGuizmo::TRANSLATE);
+  }
+  ImGui::SameLine();
+  if (ImGui::RadioButton("Rotate", curOp == ImGuizmo::ROTATE)) {
+    gizmoOp = static_cast<int>(ImGuizmo::ROTATE);
+  }
+  ImGui::SameLine();
+  if (ImGui::RadioButton("Scale", curOp == ImGuizmo::SCALE)) {
+    gizmoOp = static_cast<int>(ImGuizmo::SCALE);
+  }
+  if (ImGui::IsWindowHovered() && !ImGui::GetIO().WantTextInput) {
+    if (ImGui::IsKeyPressed(ImGuiKey_W, false)) {
+      gizmoOp = static_cast<int>(ImGuizmo::TRANSLATE);
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_E, false)) {
+      gizmoOp = static_cast<int>(ImGuizmo::ROTATE);
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_R, false)) {
+      gizmoOp = static_cast<int>(ImGuizmo::SCALE);
+    }
+  }
   ImVec2 avail = ImGui::GetContentRegionAvail();
   float iw = avail.x > 8.0f ? avail.x : 8.0f;
   float ih = avail.y > 8.0f ? avail.y : 8.0f;
@@ -106,7 +129,7 @@ void EditorApp::DrawViewport() {
       ImGuizmo::RecomposeMatrixFromComponents(e->transform.position, e->transform.rotation, e->transform.scale, matrix);
       ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
       ImGuizmo::SetRect(viewX, viewY, viewW, viewH);
-      if (ImGuizmo::Manipulate(&vf.m[0][0], &pf.m[0][0], ImGuizmo::TRANSLATE, ImGuizmo::WORLD, matrix)) {
+      if (ImGuizmo::Manipulate(&vf.m[0][0], &pf.m[0][0], static_cast<ImGuizmo::OPERATION>(gizmoOp), ImGuizmo::WORLD, matrix)) {
         Transform t = e->transform;
         ImGuizmo::DecomposeMatrixToComponents(matrix, t.position, t.rotation, t.scale);
         scene.SetTransform(e->id, t);

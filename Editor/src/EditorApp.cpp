@@ -127,6 +127,7 @@ bool EditorApp::Initialize() {
   lastMouseX = mx;
   lastMouseY = my;
   log.Add(LogLevel::Success, "Kizuri Editor ready");
+  gizmoOp = static_cast<int>(ImGuizmo::TRANSLATE);
   running = true;
   return true;
 }
