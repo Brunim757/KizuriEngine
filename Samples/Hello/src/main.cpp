@@ -575,6 +575,7 @@ bool TestLog() {
 bool TestEditQueue() {
   Kizuri::Scene scene;
   Kizuri::EditQueue queue;
+  Kizuri::UndoStack undo;
   Kizuri::EntityId a = scene.CreateEntity("A");
   Kizuri::Transform t1;
   Kizuri::MakeIdentityTransform(t1);
@@ -588,11 +589,17 @@ bool TestEditQueue() {
   if (queue.Pending() != 2) {
     return false;
   }
-  size_t applied = queue.ApplyAll(scene);
+  size_t applied = queue.ApplyAll(scene, undo);
   if (applied != 1 || queue.Pending() != 0) {
     return false;
   }
   if (scene.Get(a)->transform.position[0] != 2.0f) {
+    return false;
+  }
+  if (!undo.CanUndo()) {
+    return false;
+  }
+  if (!undo.Undo(scene) || scene.Get(a)->transform.position[0] != 0.0f) {
     return false;
   }
   Kizuri::Transform t3;
