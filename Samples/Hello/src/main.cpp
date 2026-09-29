@@ -12,6 +12,11 @@
 #include "Kizuri/MeshLoader.h"
 #include "Kizuri/PBR.h"
 #include "Kizuri/DeferredRenderer.h"
+#include "Kizuri/Scene.h"
+#include "Kizuri/Selection.h"
+#include "Kizuri/Log.h"
+#include "Kizuri/EditQueue.h"
+#include "Kizuri/Picking.h"
 #include <DirectXMath.h>
 #include <TaskScheduler.h>
 #include <cstdio>
@@ -381,6 +386,245 @@ bool TestDeferredNull() {  Kizuri::IRHI* rhi = Kizuri::CreateRHI(Kizuri::RHI_API
   Kizuri::DestroyRHI(rhi);
   return true;
 }
+bool TestSceneCrud() {
+  Kizuri::Scene scene;
+  Kizuri::EntityId a = scene.CreateEntity("Alpha");
+  Kizuri::EntityId b = scene.CreateEntity("Beta");
+  if (!a.IsValid() || !b.IsValid() || a == b) {
+    return false;
+  }
+  if (scene.Count() != 2) {
+    return false;
+  }
+  if (!scene.RenameEntity(a, "Gamma")) {
+    return false;
+  }
+  const Kizuri::Entity* e = scene.Get(a);
+  if (e == nullptr || e->name != "Gamma") {
+    return false;
+  }
+  if (e->transform.position[0] != 0.0f || e->transform.scale[0] != 1.0f) {
+    return false;
+  }
+  Kizuri::Transform t;
+  Kizuri::MakeIdentityTransform(t);
+  t.position[0] = 3.0f;
+  if (!scene.SetTransform(a, t)) {
+    return false;
+  }
+  if (scene.Get(a)->transform.position[0] != 3.0f) {
+    return false;
+  }
+  if (!scene.IsDirty()) {
+    return false;
+  }
+  scene.ClearDirty();
+  if (scene.IsDirty()) {
+    return false;
+  }
+  if (!scene.DeleteEntity(a)) {
+    return false;
+  }
+  if (scene.Has(a) || scene.Count() != 1) {
+    return false;
+  }
+  if (scene.Get(a) != nullptr) {
+    return false;
+  }
+  Kizuri::EntityId c = scene.CreateEntity("Delta");
+  if (!c.IsValid() || scene.Count() != 2) {
+    return false;
+  }
+  if (scene.DeleteEntity(Kizuri::EntityId::Invalid())) {
+    return false;
+  }
+  return true;
+}
+bool TestSceneDuplicate() {
+  Kizuri::Scene scene;
+  Kizuri::EntityId a = scene.CreateEntity("Base");
+  Kizuri::Transform t;
+  Kizuri::MakeIdentityTransform(t);
+  t.position[1] = 2.0f;
+  t.scale[0] = 3.0f;
+  scene.SetTransform(a, t);
+  Kizuri::EntityId copy = scene.DuplicateEntity(a);
+  if (!copy.IsValid() || copy == a) {
+    return false;
+  }
+  const Kizuri::Entity* e = scene.Get(copy);
+  if (e == nullptr || e->name != "Base Copy") {
+    return false;
+  }
+  if (e->transform.position[1] != 2.0f || e->transform.scale[0] != 3.0f) {
+    return false;
+  }
+  if (scene.Count() != 2) {
+    return false;
+  }
+  if (scene.DuplicateEntity(Kizuri::EntityId::Invalid()).IsValid()) {
+    return false;
+  }
+  return true;
+}
+bool TestSceneParent() {
+  Kizuri::Scene scene;
+  Kizuri::EntityId root = scene.CreateEntity("Root");
+  Kizuri::EntityId child = scene.CreateEntity("Child");
+  Kizuri::EntityId grand = scene.CreateEntity("Grand");
+  if (!scene.SetParent(child, root)) {
+    return false;
+  }
+  if (!scene.SetParent(grand, child)) {
+    return false;
+  }
+  if (scene.SetParent(root, grand)) {
+    return false;
+  }
+  if (scene.SetParent(root, root)) {
+    return false;
+  }
+  const Kizuri::Entity* r = scene.Get(root);
+  if (r == nullptr || r->children.size() != 1 || !(r->children[0] == child)) {
+    return false;
+  }
+  if (!scene.SetParent(child, Kizuri::EntityId::Invalid())) {
+    return false;
+  }
+  if (scene.Get(root)->children.size() != 0) {
+    return false;
+  }
+  if (!scene.SetParent(child, root)) {
+    return false;
+  }
+  if (!scene.DeleteEntity(root)) {
+    return false;
+  }
+  if (scene.Count() != 0 || scene.Has(child) || scene.Has(grand)) {
+    return false;
+  }
+  return true;
+}
+bool TestSelection() {
+  Kizuri::Scene scene;
+  Kizuri::SingleSelection sel;
+  if (sel.HasSelection()) {
+    return false;
+  }
+  Kizuri::EntityId a = scene.CreateEntity("A");
+  Kizuri::EntityId b = scene.CreateEntity("B");
+  sel.Select(a);
+  if (!sel.HasSelection() || !sel.IsSelected(a) || sel.IsSelected(b)) {
+    return false;
+  }
+  sel.Select(b);
+  if (!sel.IsSelected(b) || sel.IsSelected(a)) {
+    return false;
+  }
+  scene.DeleteEntity(b);
+  sel.OnEntityDeleted(b);
+  if (sel.HasSelection()) {
+    return false;
+  }
+  sel.Select(a);
+  sel.Clear();
+  if (sel.HasSelection()) {
+    return false;
+  }
+  return true;
+}
+bool TestLog() {
+  Kizuri::LogStore log;
+  log.Add(Kizuri::LogLevel::Info, "hello");
+  log.Add(Kizuri::LogLevel::Error, "boom");
+  log.Add(Kizuri::LogLevel::Warning, "careful");
+  log.Add(Kizuri::LogLevel::Success, "done");
+  if (log.Count() != 4) {
+    return false;
+  }
+  if (log.CountLevel(Kizuri::LogLevel::Error) != 1) {
+    return false;
+  }
+  if (log.At(0).text != "hello" || log.At(3).level != Kizuri::LogLevel::Success) {
+    return false;
+  }
+  if (log.At(0).seq >= log.At(3).seq) {
+    return false;
+  }
+  log.Clear();
+  return log.Count() == 0;
+}
+bool TestEditQueue() {
+  Kizuri::Scene scene;
+  Kizuri::EditQueue queue;
+  Kizuri::EntityId a = scene.CreateEntity("A");
+  Kizuri::Transform t1;
+  Kizuri::MakeIdentityTransform(t1);
+  t1.position[0] = 1.0f;
+  Kizuri::Transform t2;
+  Kizuri::MakeIdentityTransform(t2);
+  t2.position[0] = 2.0f;
+  queue.PushTransform(a, t1);
+  queue.PushTransform(a, t2);
+  queue.PushTransform(Kizuri::EntityId::Invalid(), t1);
+  if (queue.Pending() != 2) {
+    return false;
+  }
+  size_t applied = queue.ApplyAll(scene);
+  if (applied != 1 || queue.Pending() != 0) {
+    return false;
+  }
+  if (scene.Get(a)->transform.position[0] != 2.0f) {
+    return false;
+  }
+  Kizuri::Transform t3;
+  Kizuri::MakeIdentityTransform(t3);
+  t3.position[2] = 9.0f;
+  queue.PushTransform(a, t3);
+  queue.Clear();
+  if (queue.Pending() != 0) {
+    return false;
+  }
+  return scene.Get(a)->transform.position[2] == 0.0f;
+}
+bool TestPicking() {
+  Kizuri::Scene scene;
+  Kizuri::EntityId a = scene.CreateEntity("A");
+  Kizuri::Entity* e = scene.Get(a);
+  e->transform.position[0] = 0.0f;
+  e->transform.position[1] = 0.0f;
+  e->transform.position[2] = 0.0f;
+  float view[16] = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,-5,1 };
+  float proj[16] = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
+  float origin[3];
+  float dir[3];
+  Kizuri::ScreenPointRay(400.0f, 300.0f, 800.0f, 600.0f, view, proj, origin, dir);
+  Kizuri::EntityId hit = Kizuri::PickFirst(scene, origin, dir);
+  if (!(hit == a)) {
+    return false;
+  }
+  float farOrigin[3] = { 50.0f, 50.0f, 50.0f };
+  float farDir[3] = { 0.0f, 1.0f, 0.0f };
+  if (Kizuri::PickFirst(scene, farOrigin, farDir).IsValid()) {
+    return false;
+  }
+  float m[16];
+  Kizuri::ComposeMatrix(e->transform, m);
+  float t = 0.0f;
+  float ro[3] = { 0.0f, 0.0f, 5.0f };
+  float rd[3] = { 0.0f, 0.0f, -1.0f };
+  if (!Kizuri::RayVsUnitCube(ro, rd, m, t)) {
+    return false;
+  }
+  if (t < 4.4f || t > 4.6f) {
+    return false;
+  }
+  float rdUp[3] = { 0.0f, 1.0f, 0.0f };
+  if (Kizuri::RayVsUnitCube(ro, rdUp, m, t)) {
+    return false;
+  }
+  return true;
+}
 }
 int main() {
   std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -409,6 +653,13 @@ int main() {
   failures += Check("PBR-Directional", TestPBR());
   failures += Check("ShaderFiles", TestShaderFiles());
   failures += Check("Deferred-Null", TestDeferredNull());
+  failures += Check("Scene-CRUD", TestSceneCrud());
+  failures += Check("Scene-Duplicate", TestSceneDuplicate());
+  failures += Check("Scene-Parent", TestSceneParent());
+  failures += Check("Selection-Single", TestSelection());
+  failures += Check("LogStore", TestLog());
+  failures += Check("EditQueue", TestEditQueue());
+  failures += Check("Picking", TestPicking());
   if (failures == 0) {
     std::printf("KizuriHello: all bootstrap libs linked and functional\n");
   } else {

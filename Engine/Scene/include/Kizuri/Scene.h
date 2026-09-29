@@ -1,0 +1,59 @@
+#pragma once
+#include <stdint.h>
+#include <string>
+#include <vector>
+namespace Kizuri {
+struct EntityId {
+  uint32_t index;
+  uint32_t generation;
+  bool operator==(const EntityId& o) const { return index == o.index && generation == o.generation; }
+  bool operator!=(const EntityId& o) const { return !(*this == o); }
+  bool IsValid() const { return index != 0xFFFFFFFFu; }
+  static EntityId Invalid() { EntityId e; e.index = 0xFFFFFFFFu; e.generation = 0; return e; }
+};
+struct EntityIdHash {
+  size_t operator()(const EntityId& e) const { return (static_cast<size_t>(e.index) * 1315423911u) ^ static_cast<size_t>(e.generation); }
+};
+struct Transform {
+  float position[3];
+  float rotation[3];
+  float scale[3];
+};
+struct Entity {
+  EntityId id;
+  std::string name;
+  Transform transform;
+  EntityId parent;
+  std::vector<EntityId> children;
+};
+class Scene {
+public:
+  Scene();
+  EntityId CreateEntity(const std::string& name);
+  bool DeleteEntity(EntityId id);
+  EntityId DuplicateEntity(EntityId id);
+  bool RenameEntity(EntityId id, const std::string& name);
+  bool SetTransform(EntityId id, const Transform& t);
+  bool SetParent(EntityId child, EntityId parent);
+  bool Has(EntityId id) const;
+  Entity* Get(EntityId id);
+  const Entity* Get(EntityId id) const;
+  size_t Count() const;
+  std::vector<EntityId> All() const;
+  void Clear();
+  bool IsDirty() const;
+  void ClearDirty();
+private:
+  struct Slot {
+    Entity entity;
+    bool alive;
+  };
+  std::vector<Slot> slots;
+  std::vector<uint32_t> freeList;
+  bool dirty;
+  bool IsLive(uint32_t idx, uint32_t gen) const;
+  EntityId DuplicateRecursive(EntityId id, EntityId newParent);
+};
+void MakeIdentityTransform(Transform& t);
+void ComposeMatrix(const Transform& t, float m[16]);
+}

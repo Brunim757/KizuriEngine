@@ -40,7 +40,7 @@ FetchContent_MakeAvailable(DirectXMath enkiTS zstd flatbuffers)
 FetchContent_Declare(
   imgui
   GIT_REPOSITORY https://github.com/ocornut/imgui.git
-  GIT_TAG v1.92.9
+  GIT_TAG v1.92.9-docking
   GIT_SHALLOW TRUE
 )
 FetchContent_Declare(
@@ -92,8 +92,10 @@ add_library(kizuri_imgui STATIC
   ${imgui_SOURCE_DIR}/imgui_draw.cpp
   ${imgui_SOURCE_DIR}/imgui_tables.cpp
   ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+  ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp
+  ${imgui_SOURCE_DIR}/backends/imgui_impl_dx11.cpp
 )
-target_include_directories(kizuri_imgui PUBLIC ${imgui_SOURCE_DIR})
+target_include_directories(kizuri_imgui PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
 add_library(kizuri_imguizmo STATIC
   ${imguizmo_SOURCE_DIR}/src/ImGuizmo.cpp
 )

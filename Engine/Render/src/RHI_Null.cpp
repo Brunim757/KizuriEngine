@@ -69,6 +69,12 @@ public:
   int Height() const override {
     return h;
   }
+  void* GetNativeDevice() const override {
+    return nullptr;
+  }
+  void* GetNativeContext() const override {
+    return nullptr;
+  }
   void GetCacheStats(uint64_t& t, uint64_t& d) const override {
     t = total;
     d = discarded;

@@ -1,2 +1,2 @@
 add_executable(KizuriHello src/main.cpp)
-target_link_libraries(KizuriHello PRIVATE KizuriCore KizuriRender KizuriPhysics KizuriAnimation KizuriAudio KizuriScripting)
+target_link_libraries(KizuriHello PRIVATE KizuriCore KizuriRender KizuriPhysics KizuriAnimation KizuriAudio KizuriScripting KizuriScene)

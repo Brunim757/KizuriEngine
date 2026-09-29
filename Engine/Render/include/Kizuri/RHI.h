@@ -66,6 +66,8 @@ public:
   virtual const char* BackendName() const = 0;
   virtual int Width() const = 0;
   virtual int Height() const = 0;
+  virtual void* GetNativeDevice() const = 0;
+  virtual void* GetNativeContext() const = 0;
   virtual void GetCacheStats(uint64_t& total, uint64_t& discarded) const = 0;
   virtual RHIBuffer CreateBuffer(uint64_t size, uint32_t stride, bool isIndex, const void* initialData) = 0;
   virtual void DestroyBuffer(RHIBuffer buf) = 0;

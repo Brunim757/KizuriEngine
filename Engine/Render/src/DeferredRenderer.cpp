@@ -39,6 +39,8 @@ DeferredRenderer::DeferredRenderer()
   , layout(0)
   , sampler(0)
   , indexCount(0)
+  , viewX(0.0f)
+  , viewY(0.0f)
   , ready(false) {
   material.albedo[0] = 0.8f;
   material.albedo[1] = 0.2f;
@@ -187,6 +189,10 @@ bool DeferredRenderer::Resize(int nw, int nh) {
   DestroyTargets();
   return CreateTargets();
 }
+void DeferredRenderer::SetViewOffset(float x, float y) {
+  viewX = x;
+  viewY = y;
+}
 void DeferredRenderer::Render(const float view[16], const float proj[16], const float camPos[3]) {
   if (!ready || rhi == nullptr || vb == 0 || ib == 0) {
     return;
@@ -199,8 +205,8 @@ void DeferredRenderer::Render(const float view[16], const float proj[16], const 
   rhi->ClearRenderTarget(gPosition, 0.0f, 0.0f, 0.0f, 1.0f);
   rhi->ClearDepth(gDepth);
   RHIViewport vp;
-  vp.x = 0.0f;
-  vp.y = 0.0f;
+  vp.x = viewX;
+  vp.y = viewY;
   vp.w = static_cast<float>(w);
   vp.h = static_cast<float>(h);
   vp.minD = 0.0f;
@@ -246,6 +252,14 @@ void DeferredRenderer::Render(const float view[16], const float proj[16], const 
   rhi->SetPixelConstantBuffer(0, matCB);
   rhi->DrawIndexed(indexCount, 0, 0);
   rhi->BindBackbuffer();
+  RHIViewport lvp;
+  lvp.x = viewX;
+  lvp.y = viewY;
+  lvp.w = static_cast<float>(w);
+  lvp.h = static_cast<float>(h);
+  lvp.minD = 0.0f;
+  lvp.maxD = 1.0f;
+  rhi->SetViewport(lvp);
   RHIDepthStencil dsOff;
   dsOff.depthEnable = false;
   dsOff.depthWrite = false;

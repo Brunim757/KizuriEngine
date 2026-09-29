@@ -65,6 +65,14 @@ void FreeCamera::Update(float dt, bool fwd, bool back, bool left, bool right, bo
   py = o.y;
   pz = o.z;
 }
+void FreeCamera::Focus(float x, float y, float z, float distance) {
+  float dx = sinf(yaw) * cosf(pitch);
+  float dy = -sinf(pitch);
+  float dz = cosf(yaw) * cosf(pitch);
+  px = x - dx * distance;
+  py = y - dy * distance;
+  pz = z - dz * distance;
+}
 XMMATRIX FreeCamera::View() const {
   XMVECTOR pos = XMVectorSet(px, py, pz, 1.0f);
   XMVECTOR dir = XMVectorSet(sinf(yaw) * cosf(pitch), -sinf(pitch), cosf(yaw) * cosf(pitch), 0.0f);

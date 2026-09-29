@@ -23,6 +23,7 @@ public:
   void SetMaterial(const DeferredMaterial& mat);
   void SetLight(const DeferredLight& light);
   bool Resize(int w, int h);
+  void SetViewOffset(float x, float y);
   void Render(const float view[16], const float proj[16], const float camPos[3]);
   bool IsReady() const;
 private:
@@ -46,6 +47,8 @@ private:
   RHIInputLayout layout;
   RHISampler sampler;
   uint32_t indexCount;
+  float viewX;
+  float viewY;
   bool ready;
   DeferredMaterial material;
   DeferredLight light;

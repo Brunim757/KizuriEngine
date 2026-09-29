@@ -5,7 +5,14 @@
 namespace Kizuri {
 namespace {
 const wchar_t* kClassName = L"KizuriEngineWindow";
+Window::MessageHook g_hook;
 LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+  if (g_hook) {
+    long long handled = g_hook(hWnd, msg, static_cast<unsigned long long>(wParam), static_cast<long long>(lParam));
+    if (handled != 0) {
+      return static_cast<LRESULT>(handled);
+    }
+  }
   Window* self = nullptr;
   if (msg == WM_NCCREATE) {
     CREATESTRUCTW* cs = reinterpret_cast<CREATESTRUCTW*>(lParam);
@@ -137,5 +144,11 @@ int Window::Width() const {
 }
 int Window::Height() const {
   return height;
+}
+void Window::SetMessageHook(MessageHook hook) {
+  g_hook = hook;
+}
+void Window::ClearMessageHook() {
+  g_hook = nullptr;
 }
 }

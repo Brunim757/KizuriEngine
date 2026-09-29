@@ -193,6 +193,12 @@ public:
   int Height() const override {
     return h;
   }
+  void* GetNativeDevice() const override {
+    return device.Get();
+  }
+  void* GetNativeContext() const override {
+    return context.Get();
+  }
   void GetCacheStats(uint64_t& t, uint64_t& d) const override {
     t = total;
     d = discarded;
