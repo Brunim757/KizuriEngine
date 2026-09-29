@@ -54,6 +54,7 @@ struct EditorApp {
   bool openDialogQueued;
   bool saveDialogQueued;
   bool afterSaveRunPending;
+  bool savePromptQueued;
   std::string saveDialogPrefill;
   EditorApp();
   bool Initialize();

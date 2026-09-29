@@ -44,7 +44,8 @@ EditorApp::EditorApp()
   , pendingAction(0)
   , openDialogQueued(false)
   , saveDialogQueued(false)
-  , afterSaveRunPending(false) {
+  , afterSaveRunPending(false)
+  , savePromptQueued(false) {
   renameBuf[0] = '\0';
 }
 std::string EditorApp::FindShaderDir() {
@@ -221,6 +222,10 @@ void EditorApp::Frame() {
   ImGuiViewport* viewport = ImGui::GetMainViewport();
   ImGui::DockSpaceOverViewport(0, viewport);
   ProcessQueuedDialogs();
+  if (savePromptQueued) {
+    savePromptQueued = false;
+    ImGui::OpenPopup("Unsaved Changes");
+  }
   DrawMenuBar();
   if (showViewport) {
     DrawViewport();
@@ -314,7 +319,7 @@ void EditorApp::RefreshTitle() {
 void EditorApp::RequestAction(int action) {
   if (scene.IsDirty()) {
     pendingAction = action;
-    ImGui::OpenPopup("Unsaved Changes");
+    savePromptQueued = true;
     return;
   }
   pendingAction = action;
