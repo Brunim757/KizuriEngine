@@ -50,6 +50,9 @@ EditorApp::EditorApp()
   renameBuf[0] = '\0';
   MakeIdentityTransform(gizmoStart);
   gizmoTarget = EntityId::Invalid();
+  rubberActive = false;
+  rubberX0 = 0.0f;
+  rubberY0 = 0.0f;
 }
 std::string EditorApp::FindShaderDir() {
   const char* dirs[4] = { "Shaders", "../Shaders", "../../Shaders", "build/bin/Release/Shaders" };
@@ -234,8 +237,11 @@ void EditorApp::DoRedo() {
   log.Add(LogLevel::Info, std::string("Redo ") + name);
 }
 void EditorApp::SyncSelection() {
-  if (selection.HasSelection() && !scene.Has(selection.Get())) {
-    selection.Clear();
+  std::vector<EntityId> all = selection.All();
+  for (size_t i = 0; i < all.size(); ++i) {
+    if (!scene.Has(all[i])) {
+      selection.Remove(all[i]);
+    }
   }
 }
 void EditorApp::SelectNewEntity(const std::vector<EntityId>& beforeIds) {

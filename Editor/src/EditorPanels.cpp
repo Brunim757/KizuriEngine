@@ -72,11 +72,56 @@ void EditorApp::HandleViewportClick() {
   float dir[3];
   ScreenPointRay(mp.x - viewX, mp.y - viewY, viewW, viewH, &vf.m[0][0], &pf.m[0][0], origin, dir);
   EntityId hit = PickFirst(scene, origin, dir);
+  ImGuiIO& cio = ImGui::GetIO();
   if (hit.IsValid()) {
-    selection.Select(hit);
-  } else {
+    if (cio.KeyShift) {
+      selection.Add(hit);
+    } else if (cio.KeyCtrl) {
+      selection.Toggle(hit);
+    } else {
+      selection.Select(hit);
+    }
+  } else if (!cio.KeyShift && !cio.KeyCtrl) {
     selection.Clear();
   }
+}
+void EditorApp::HandleRubberSelect(float x0, float y0, float x1, float y1) {
+  DirectX::XMMATRIX view = camera.View();
+  float aspect = viewW / viewH;
+  DirectX::XMMATRIX proj = camera.Projection(aspect);
+  DirectX::XMFLOAT4X4 vf;
+  DirectX::XMFLOAT4X4 pf;
+  DirectX::XMStoreFloat4x4(&vf, view);
+  DirectX::XMStoreFloat4x4(&pf, proj);
+  std::vector<EntityId> hits;
+  std::vector<EntityId> all = scene.All();
+  for (size_t i = 0; i < all.size(); ++i) {
+    float ex0;
+    float ey0;
+    float ex1;
+    float ey1;
+    if (EntityScreenRect(scene, all[i], &vf.m[0][0], &pf.m[0][0], viewX, viewY, viewW, viewH, ex0, ey0, ex1, ey1)) {
+      if (RectsOverlap(x0, y0, x1, y1, ex0, ey0, ex1, ey1)) {
+        hits.push_back(all[i]);
+      }
+    }
+  }
+  ImGuiIO& rio = ImGui::GetIO();
+  if (rio.KeyShift) {
+    for (size_t i = 0; i < hits.size(); ++i) {
+      selection.Add(hits[i]);
+    }
+  } else if (rio.KeyCtrl) {
+    for (size_t i = 0; i < hits.size(); ++i) {
+      selection.Toggle(hits[i]);
+    }
+  } else {
+    selection.Clear();
+    for (size_t i = 0; i < hits.size(); ++i) {
+      selection.Add(hits[i]);
+    }
+  }
+  log.Add(LogLevel::Info, std::string("Rubber select: ") + std::to_string(hits.size()));
 }
 void EditorApp::DrawViewport() {
   ImGui::Begin("Viewport", &showViewport);
@@ -116,40 +161,124 @@ void EditorApp::DrawViewport() {
   vdl->ChannelsSplit(2);
   vdl->ChannelsSetCurrent(1);
   if (selection.HasSelection()) {
-    Entity* e = scene.Get(selection.Get());
-    if (e != nullptr) {
-      DirectX::XMMATRIX view = camera.View();
-      float aspect = viewW / viewH;
-      DirectX::XMMATRIX proj = camera.Projection(aspect);
-      DirectX::XMFLOAT4X4 vf;
-      DirectX::XMFLOAT4X4 pf;
-      DirectX::XMStoreFloat4x4(&vf, view);
-      DirectX::XMStoreFloat4x4(&pf, proj);
-      float matrix[16];
-      ImGuizmo::RecomposeMatrixFromComponents(e->transform.position, e->transform.rotation, e->transform.scale, matrix);
-      ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
-      ImGuizmo::SetRect(viewX, viewY, viewW, viewH);
-      if (ImGuizmo::Manipulate(&vf.m[0][0], &pf.m[0][0], static_cast<ImGuizmo::OPERATION>(gizmoOp), ImGuizmo::WORLD, matrix)) {
-        if (!gizmoDragging) {
-          gizmoDragging = true;
-          gizmoStart = e->transform;
-          gizmoTarget = e->id;
-        }
-        Transform t = e->transform;
-        ImGuizmo::DecomposeMatrixToComponents(matrix, t.position, t.rotation, t.scale);
-        scene.SetTransform(e->id, t);
-      } else if (gizmoDragging) {
+    SyncSelection();
+  }
+  if (selection.HasSelection()) {
+    DirectX::XMMATRIX view = camera.View();
+    float aspect = viewW / viewH;
+    DirectX::XMMATRIX proj = camera.Projection(aspect);
+    DirectX::XMFLOAT4X4 vf;
+    DirectX::XMFLOAT4X4 pf;
+    DirectX::XMStoreFloat4x4(&vf, view);
+    DirectX::XMStoreFloat4x4(&pf, proj);
+    if (selection.Count() == 1) {
+      Entity* e = scene.Get(selection.Get());
+      if (e == nullptr) {
+        selection.Clear();
         gizmoDragging = false;
-        const Entity* cur = scene.Get(gizmoTarget);
-        if (cur != nullptr && std::memcmp(&gizmoStart, &cur->transform, sizeof(Transform)) != 0) {
-          std::unique_ptr<Command> cmd(new EditTransformCmd(gizmoTarget, gizmoStart, cur->transform));
-          undo.Commit(std::move(cmd));
+      } else {
+        float matrix[16];
+        ImGuizmo::RecomposeMatrixFromComponents(e->transform.position, e->transform.rotation, e->transform.scale, matrix);
+        ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
+        ImGuizmo::SetRect(viewX, viewY, viewW, viewH);
+        if (ImGuizmo::Manipulate(&vf.m[0][0], &pf.m[0][0], static_cast<ImGuizmo::OPERATION>(gizmoOp), ImGuizmo::WORLD, matrix)) {
+          if (!gizmoDragging) {
+            gizmoDragging = true;
+            gizmoStart = e->transform;
+            gizmoTarget = e->id;
+          }
+          Transform t = e->transform;
+          ImGuizmo::DecomposeMatrixToComponents(matrix, t.position, t.rotation, t.scale);
+          scene.SetTransform(e->id, t);
+        } else if (gizmoDragging) {
+          gizmoDragging = false;
+          const Entity* cur = scene.Get(gizmoTarget);
+          if (cur != nullptr && std::memcmp(&gizmoStart, &cur->transform, sizeof(Transform)) != 0) {
+            std::unique_ptr<Command> cmd(new EditTransformCmd(gizmoTarget, gizmoStart, cur->transform));
+            undo.Commit(std::move(cmd));
+          }
+          gizmoTarget = EntityId::Invalid();
         }
-        gizmoTarget = EntityId::Invalid();
       }
     } else {
-      selection.Clear();
+      float avg[3] = { 0.0f, 0.0f, 0.0f };
+      std::vector<EntityId> members = selection.All();
+      size_t alive = 0;
+      for (size_t i = 0; i < members.size(); ++i) {
+        const Entity* e = scene.Get(members[i]);
+        if (e == nullptr) {
+          continue;
+        }
+        avg[0] += e->transform.position[0];
+        avg[1] += e->transform.position[1];
+        avg[2] += e->transform.position[2];
+        ++alive;
+      }
+      if (alive == 0) {
+        selection.Clear();
+        gizmoDragging = false;
+      } else {
+        avg[0] /= static_cast<float>(alive);
+        avg[1] /= static_cast<float>(alive);
+        avg[2] /= static_cast<float>(alive);
+        float one[3] = { 1.0f, 1.0f, 1.0f };
+        float zero[3] = { 0.0f, 0.0f, 0.0f };
+        float matrix[16];
+        ImGuizmo::RecomposeMatrixFromComponents(avg, zero, one, matrix);
+        ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
+        ImGuizmo::SetRect(viewX, viewY, viewW, viewH);
+        if (ImGuizmo::Manipulate(&vf.m[0][0], &pf.m[0][0], static_cast<ImGuizmo::OPERATION>(gizmoOp), ImGuizmo::WORLD, matrix)) {
+          if (!gizmoDragging) {
+            gizmoDragging = true;
+            gizmoOrigins.clear();
+            for (size_t i = 0; i < members.size(); ++i) {
+              const Entity* e = scene.Get(members[i]);
+              if (e != nullptr) {
+                gizmoOrigins[members[i]] = e->transform;
+              }
+            }
+          }
+          float npos[3];
+          float nrot[3];
+          float nscl[3];
+          ImGuizmo::DecomposeMatrixToComponents(matrix, npos, nrot, nscl);
+          float dpos[3] = { npos[0] - avg[0], npos[1] - avg[1], npos[2] - avg[2] };
+          float dfac[3] = { nscl[0] < 0.01f ? 0.01f : nscl[0], nscl[1] < 0.01f ? 0.01f : nscl[1], nscl[2] < 0.01f ? 0.01f : nscl[2] };
+          for (auto& kv : gizmoOrigins) {
+            Entity* e = scene.Get(kv.first);
+            if (e == nullptr) {
+              continue;
+            }
+            Transform t = kv.second;
+            t.position[0] += dpos[0];
+            t.position[1] += dpos[1];
+            t.position[2] += dpos[2];
+            t.rotation[0] += nrot[0];
+            t.rotation[1] += nrot[1];
+            t.rotation[2] += nrot[2];
+            t.scale[0] *= dfac[0];
+            t.scale[1] *= dfac[1];
+            t.scale[2] *= dfac[2];
+            if (t.scale[0] < 0.01f) {
+              t.scale[0] = 0.01f;
+            }
+            if (t.scale[1] < 0.01f) {
+              t.scale[1] = 0.01f;
+            }
+            if (t.scale[2] < 0.01f) {
+              t.scale[2] = 0.01f;
+            }
+            scene.SetTransform(e->id, t);
+          }
+        } else if (gizmoDragging) {
+          gizmoDragging = false;
+          gizmoOrigins.clear();
+        }
+      }
     }
+  } else {
+    gizmoDragging = false;
+    gizmoOrigins.clear();
   }
   vdl->ChannelsSetCurrent(0);
   gizmoHotLast = ImGuizmo::IsOver();
@@ -206,8 +335,25 @@ void EditorApp::DrawViewport() {
     int dy = uy - downY;
     if (dx * dx + dy * dy < 25 && canvasHovered) {
       HandleViewportClick();
+    } else if (canvasHovered) {
+      HandleRubberSelect(static_cast<float>(downX), static_cast<float>(downY), static_cast<float>(ux), static_cast<float>(uy));
     }
     downPosValid = false;
+    rubberActive = false;
+  }
+  if (downPosValid && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+    ImVec2 mp = ImGui::GetMousePos();
+    float dx = mp.x - static_cast<float>(downX);
+    float dy = mp.y - static_cast<float>(downY);
+    if (dx * dx + dy * dy >= 25.0f) {
+      rubberActive = true;
+      rubberX0 = static_cast<float>(downX);
+      rubberY0 = static_cast<float>(downY);
+      ImGui::GetWindowDrawList()->AddRect(ImVec2(rubberX0, rubberY0), mp, IM_COL32(255, 255, 255, 255));
+      ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(rubberX0, rubberY0), mp, IM_COL32(120, 180, 255, 40));
+    } else {
+      rubberActive = false;
+    }
   }
   if (canvasHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
     rdownX = static_cast<int>(ImGui::GetMousePos().x);
@@ -307,7 +453,7 @@ void EditorApp::DrawHierarchy() {
       continue;
     }
     ImGui::PushID(static_cast<int>(e->id.index * 1315423911u + e->id.generation));
-    bool isSel = selection.IsSelected(e->id);
+    bool isSel = selection.Contains(e->id);
     if (renameActive && renameTarget == e->id) {
       ImGui::SetKeyboardFocusHere(0);
       if (ImGui::InputText("##rename", renameBuf, sizeof(renameBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
@@ -326,7 +472,14 @@ void EditorApp::DrawHierarchy() {
       }
     } else {
       if (ImGui::Selectable(e->name.c_str(), isSel)) {
-        selection.Select(e->id);
+        ImGuiIO& hio = ImGui::GetIO();
+        if (hio.KeyShift) {
+          selection.Add(e->id);
+        } else if (hio.KeyCtrl) {
+          selection.Toggle(e->id);
+        } else {
+          selection.Select(e->id);
+        }
       }
       if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
         renameActive = true;
@@ -382,6 +535,9 @@ void EditorApp::DrawInspector() {
     return;
   }
   ImGui::Text("Entity: %s", e->name.c_str());
+  if (selection.Count() > 1) {
+    ImGui::Text("%llu selected", (unsigned long long)selection.Count());
+  }
   ImGui::Separator();
   ImGui::Text("Transform");
   Transform t = e->transform;

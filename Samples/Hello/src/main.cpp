@@ -13,7 +13,7 @@
 #include "Kizuri/PBR.h"
 #include "Kizuri/DeferredRenderer.h"
 #include "Kizuri/Scene.h"
-#include "Kizuri/Selection.h"
+#include "Kizuri/MultiSelection.h"
 #include "Kizuri/Log.h"
 #include "Kizuri/EditQueue.h"
 #include "Kizuri/Picking.h"
@@ -523,30 +523,110 @@ bool TestSceneParent() {
   }
   return true;
 }
-bool TestSelection() {
+bool TestSelectionSet() {
   Kizuri::Scene scene;
-  Kizuri::SingleSelection sel;
-  if (sel.HasSelection()) {
+  Kizuri::SelectionSet sel;
+  if (sel.HasSelection() || sel.Count() != 0) {
     return false;
   }
   Kizuri::EntityId a = scene.CreateEntity("A");
   Kizuri::EntityId b = scene.CreateEntity("B");
+  Kizuri::EntityId c = scene.CreateEntity("C");
   sel.Select(a);
-  if (!sel.HasSelection() || !sel.IsSelected(a) || sel.IsSelected(b)) {
+  if (!sel.HasSelection() || !sel.Contains(a) || sel.Contains(b) || sel.Count() != 1) {
+    return false;
+  }
+  if (!(sel.Get() == a) || !(sel.Primary() == a) || !(sel.At(0) == a)) {
+    return false;
+  }
+  sel.Add(b);
+  sel.Add(b);
+  if (sel.Count() != 2 || !sel.Contains(b)) {
+    return false;
+  }
+  sel.Toggle(b);
+  if (sel.Contains(b) || sel.Count() != 1) {
+    return false;
+  }
+  sel.Toggle(c);
+  if (!sel.Contains(c) || sel.Count() != 2) {
+    return false;
+  }
+  sel.Remove(a);
+  if (sel.Contains(a) || sel.Count() != 1 || !(sel.Primary() == c)) {
     return false;
   }
   sel.Select(b);
-  if (!sel.IsSelected(b) || sel.IsSelected(a)) {
-    return false;
-  }
   scene.DeleteEntity(b);
   sel.OnEntityDeleted(b);
   if (sel.HasSelection()) {
     return false;
   }
-  sel.Select(a);
+  sel.Add(a);
+  sel.Add(c);
+  scene.DeleteEntity(a);
+  sel.OnEntityDeleted(a);
+  if (sel.Count() != 1 || !sel.Contains(c)) {
+    return false;
+  }
   sel.Clear();
-  if (sel.HasSelection()) {
+  if (sel.HasSelection() || !sel.IsEmpty()) {
+    return false;
+  }
+  if (sel.At(99).IsValid()) {
+    return false;
+  }
+  return true;
+}
+bool TestScreenRect() {
+  Kizuri::Scene scene;
+  Kizuri::EntityId a = scene.CreateEntity("A");
+  Kizuri::FreeCamera cam;
+  cam.SetPosition(0.0f, 0.0f, -5.0f);
+  cam.SetYawPitch(0.0f, 0.0f);
+  DirectX::XMMATRIX v = cam.View();
+  DirectX::XMMATRIX p = cam.Projection(800.0f / 600.0f);
+  DirectX::XMFLOAT4X4 vf;
+  DirectX::XMFLOAT4X4 pf;
+  DirectX::XMStoreFloat4x4(&vf, v);
+  DirectX::XMStoreFloat4x4(&pf, p);
+  float x0;
+  float y0;
+  float x1;
+  float y1;
+  if (!Kizuri::EntityScreenRect(scene, a, &vf.m[0][0], &pf.m[0][0], 0.0f, 0.0f, 800.0f, 600.0f, x0, y0, x1, y1)) {
+    return false;
+  }
+  if (x0 > 400.0f || x1 < 400.0f || y0 > 300.0f || y1 < 300.0f) {
+    return false;
+  }
+  if (x1 - x0 <= 1.0f || y1 - y0 <= 1.0f) {
+    return false;
+  }
+  Kizuri::EntityId b = scene.CreateEntity("B");
+  Kizuri::Entity* e = scene.Get(b);
+  e->transform.position[0] = 0.0f;
+  e->transform.position[1] = 0.0f;
+  e->transform.position[2] = -50.0f;
+  if (Kizuri::EntityScreenRect(scene, b, &vf.m[0][0], &pf.m[0][0], 0.0f, 0.0f, 800.0f, 600.0f, x0, y0, x1, y1)) {
+    return false;
+  }
+  if (!Kizuri::EntityScreenRect(scene, Kizuri::EntityId::Invalid(), &vf.m[0][0], &pf.m[0][0], 0.0f, 0.0f, 800.0f, 600.0f, x0, y0, x1, y1)) {
+    return true;
+  }
+  return false;
+}
+bool TestRectOverlap() {
+  if (!Kizuri::RectsOverlap(0.0f, 0.0f, 10.0f, 10.0f, 5.0f, 5.0f, 15.0f, 15.0f)) {
+    return false;
+  }
+  if (Kizuri::RectsOverlap(0.0f, 0.0f, 10.0f, 10.0f, 20.0f, 20.0f, 30.0f, 30.0f)) {
+    return false;
+  }
+  if (!Kizuri::RectsOverlap(10.0f, 10.0f, 0.0f, 0.0f, 5.0f, 5.0f, 15.0f, 15.0f)) {
+    return false;
+  }
+  if (!Kizuri::RectsOverlap(0.0f, 0.0f, 10.0f, 10.0f, 10.0f, 0.0f, 20.0f, 10.0f)) {
     return false;
   }
   return true;
@@ -949,7 +1029,9 @@ int main() {
   failures += Check("Scene-CRUD", TestSceneCrud());
   failures += Check("Scene-Duplicate", TestSceneDuplicate());
   failures += Check("Scene-Parent", TestSceneParent());
-  failures += Check("Selection-Single", TestSelection());
+  failures += Check("Selection-Set", TestSelectionSet());
+  failures += Check("ScreenRect", TestScreenRect());
+  failures += Check("RectOverlap", TestRectOverlap());
   failures += Check("LogStore", TestLog());
   failures += Check("EditQueue", TestEditQueue());
   failures += Check("Picking", TestPicking());

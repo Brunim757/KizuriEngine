@@ -68,8 +68,7 @@ bool RayVsUnitCube(const float origin[3], const float dir[3], const float matrix
   t = tmin < 0.0f ? 0.0f : tmin;
   return true;
 }
-EntityId PickFirst(const Scene& scene, const float origin[3], const float dir[3]) {
-  std::vector<EntityId> all = scene.All();
+EntityId PickFirst(const Scene& scene, const float origin[3], const float dir[3]) {  std::vector<EntityId> all = scene.All();
   EntityId best = EntityId::Invalid();
   float bestT = 1e30f;
   for (size_t i = 0; i < all.size(); ++i) {
@@ -86,5 +85,67 @@ EntityId PickFirst(const Scene& scene, const float origin[3], const float dir[3]
     }
   }
   return best;
+}
+bool EntityScreenRect(const Scene& scene, EntityId id, const float view[16], const float proj[16], float viewX, float viewY, float viewW, float viewH, float& x0, float& y0, float& x1, float& y1) {
+  const Entity* e = scene.Get(id);
+  if (e == nullptr || viewW <= 0.0f || viewH <= 0.0f) {
+    return false;
+  }
+  float m[16];
+  ComposeMatrix(e->transform, m);
+  XMMATRIX vm;
+  std::memcpy(&vm, view, sizeof(vm));
+  XMMATRIX pm;
+  std::memcpy(&pm, proj, sizeof(pm));
+  XMMATRIX wm;
+  std::memcpy(&wm, m, sizeof(wm));
+  XMMATRIX im = XMMatrixIdentity();
+  bool first = true;
+  for (int c = 0; c < 8; ++c) {
+    float lx = (c & 1) ? 0.5f : -0.5f;
+    float ly = (c & 2) ? 0.5f : -0.5f;
+    float lz = (c & 4) ? 0.5f : -0.5f;
+    XMVECTOR vv = XMVector3TransformCoord(XMVectorSet(lx, ly, lz, 1.0f), vm);
+    XMFLOAT3 vs;
+    XMStoreFloat3(&vs, vv);
+    if (vs.z <= 0.01f) {
+      return false;
+    }
+    XMVECTOR sp = XMVector3Project(XMVectorSet(lx, ly, lz, 1.0f), viewX, viewY, viewW, viewH, 0.0f, 1.0f, pm, vm, wm);
+    XMFLOAT3 s;
+    XMStoreFloat3(&s, sp);
+    if (first) {
+      x0 = s.x;
+      y0 = s.y;
+      x1 = s.x;
+      y1 = s.y;
+      first = false;
+    } else {
+      if (s.x < x0) {
+        x0 = s.x;
+      }
+      if (s.y < y0) {
+        y0 = s.y;
+      }
+      if (s.x > x1) {
+        x1 = s.x;
+      }
+      if (s.y > y1) {
+        y1 = s.y;
+      }
+    }
+  }
+  return !first;
+}
+bool RectsOverlap(float ax0, float ay0, float ax1, float ay1, float bx0, float by0, float bx1, float by1) {
+  float aMinX = ax0 < ax1 ? ax0 : ax1;
+  float aMaxX = ax0 > ax1 ? ax0 : ax1;
+  float aMinY = ay0 < ay1 ? ay0 : ay1;
+  float aMaxY = ay0 > ay1 ? ay0 : ay1;
+  float bMinX = bx0 < bx1 ? bx0 : bx1;
+  float bMaxX = bx0 > bx1 ? bx0 : bx1;
+  float bMinY = by0 < by1 ? by0 : by1;
+  float bMaxY = by0 > by1 ? by0 : by1;
+  return aMinX <= bMaxX && aMaxX >= bMinX && aMinY <= bMaxY && aMaxY >= bMinY;
 }
 }

@@ -1,6 +1,6 @@
 #pragma once
 #include "Kizuri/Scene.h"
-#include "Kizuri/Selection.h"
+#include "Kizuri/MultiSelection.h"
 #include "Kizuri/Log.h"
 #include "Kizuri/EditQueue.h"
 #include "Kizuri/Undo.h"
@@ -10,19 +10,24 @@
 #include "Kizuri/MeshLoader.h"
 #include "Kizuri/DeferredRenderer.h"
 #include <string>
+#include <unordered_map>
 namespace Kizuri {
 struct EditorApp {
   Window window;
   IRHI* rhi;
   DeferredRenderer renderer;
   Scene scene;
-  SingleSelection selection;
+  SelectionSet selection;
   LogStore log;
   EditQueue edits;
   UndoStack undo;
   bool gizmoDragging;
   Transform gizmoStart;
   EntityId gizmoTarget;
+  std::unordered_map<EntityId, Transform, EntityIdHash> gizmoOrigins;
+  bool rubberActive;
+  float rubberX0;
+  float rubberY0;
   FreeCamera camera;
   StaticMesh cubeMesh;
   bool cubeReady;
@@ -74,6 +79,7 @@ struct EditorApp {
   void RenderScene();
   void UpdateCamera(float dt, bool lookNow);
   void HandleViewportClick();
+  void HandleRubberSelect(float x0, float y0, float x1, float y1);
   void CreateEntityAt(float x, float y, float z);
   void FocusEntity(EntityId id);
   void RefreshTitle();
