@@ -594,8 +594,21 @@ bool TestPicking() {
   e->transform.position[0] = 0.0f;
   e->transform.position[1] = 0.0f;
   e->transform.position[2] = 0.0f;
-  float view[16] = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,-5,1 };
-  float proj[16] = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
+  float view[16];
+  float proj[16];
+  {
+    Kizuri::FreeCamera cam;
+    cam.SetPosition(0.0f, 0.0f, -5.0f);
+    cam.SetYawPitch(0.0f, 0.0f);
+    DirectX::XMMATRIX v = cam.View();
+    DirectX::XMMATRIX p = cam.Projection(800.0f / 600.0f);
+    DirectX::XMFLOAT4X4 vf;
+    DirectX::XMFLOAT4X4 pf;
+    DirectX::XMStoreFloat4x4(&vf, v);
+    DirectX::XMStoreFloat4x4(&pf, p);
+    std::memcpy(view, &vf.m[0][0], sizeof(view));
+    std::memcpy(proj, &pf.m[0][0], sizeof(proj));
+  }
   float origin[3];
   float dir[3];
   Kizuri::ScreenPointRay(400.0f, 300.0f, 800.0f, 600.0f, view, proj, origin, dir);
