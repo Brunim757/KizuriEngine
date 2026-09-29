@@ -5,6 +5,7 @@
 #include <commdlg.h>
 namespace Kizuri {
 namespace {
+unsigned long g_lastErr = 0;
 void ToNarrow(const wchar_t* wide, std::string& out) {
   out.clear();
   if (wide == nullptr) {
@@ -42,6 +43,7 @@ bool ShowOpenSceneDialog(void* hwnd, std::string& outPath) {
   ofn.lpstrDefExt = L"kzscene";
   ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST | OFN_NOCHANGEDIR;
   if (GetOpenFileNameW(&ofn) == FALSE) {
+    g_lastErr = CommDlgExtendedError();
     return false;
   }
   ToNarrow(file, outPath);
@@ -61,9 +63,13 @@ bool ShowSaveSceneDialog(void* hwnd, std::string& outPath) {
   ofn.lpstrDefExt = L"kzscene";
   ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR;
   if (GetSaveFileNameW(&ofn) == FALSE) {
+    g_lastErr = CommDlgExtendedError();
     return false;
   }
   ToNarrow(file, outPath);
   return !outPath.empty();
+}
+unsigned long GetLastDialogError() {
+  return g_lastErr;
 }
 }

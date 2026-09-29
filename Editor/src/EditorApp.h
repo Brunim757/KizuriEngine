@@ -51,6 +51,10 @@ struct EditorApp {
   bool titleDirtyShown;
   std::string titlePathShown;
   int pendingAction;
+  bool openDialogQueued;
+  bool saveDialogQueued;
+  bool afterSaveRunPending;
+  std::string saveDialogPrefill;
   EditorApp();
   bool Initialize();
   int Run();
@@ -73,6 +77,7 @@ struct EditorApp {
   void DoOpenPath(const std::string& path);
   void DoNewScene();
   void DrawSavePrompt();
+  void ProcessQueuedDialogs();
   std::string FindAsset(const char* name);
   std::string FindShaderDir();
 };

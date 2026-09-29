@@ -41,7 +41,10 @@ EditorApp::EditorApp()
   , renameActive(false)
   , renameTarget(EntityId::Invalid())
   , titleDirtyShown(false)
-  , pendingAction(0) {
+  , pendingAction(0)
+  , openDialogQueued(false)
+  , saveDialogQueued(false)
+  , afterSaveRunPending(false) {
   renameBuf[0] = '\0';
 }
 std::string EditorApp::FindShaderDir() {
@@ -185,12 +188,12 @@ void EditorApp::UpdateCamera(float dt, bool lookNow) {
   }
   camera.Update(
     dt,
-    RawInputPoll::IsKeyDown(0x57),
-    RawInputPoll::IsKeyDown(0x53),
-    RawInputPoll::IsKeyDown(0x41),
-    RawInputPoll::IsKeyDown(0x44),
-    RawInputPoll::IsKeyDown(0x45),
-    RawInputPoll::IsKeyDown(0x51),
+    lookNow && RawInputPoll::IsKeyDown(0x57),
+    lookNow && RawInputPoll::IsKeyDown(0x53),
+    lookNow && RawInputPoll::IsKeyDown(0x41),
+    lookNow && RawInputPoll::IsKeyDown(0x44),
+    lookNow && RawInputPoll::IsKeyDown(0x45),
+    lookNow && RawInputPoll::IsKeyDown(0x51),
     lookNow ? static_cast<float>(mdx) : 0.0f,
     lookNow ? static_cast<float>(mdy) : 0.0f);
 }
@@ -217,6 +220,7 @@ void EditorApp::FocusEntity(EntityId id) {
 void EditorApp::Frame() {
   ImGuiViewport* viewport = ImGui::GetMainViewport();
   ImGui::DockSpaceOverViewport(0, viewport);
+  ProcessQueuedDialogs();
   DrawMenuBar();
   if (showViewport) {
     DrawViewport();
@@ -250,19 +254,17 @@ void EditorApp::DrawMenuBar() {
       }
       if (ImGui::MenuItem("Save")) {
         if (currentPath.empty()) {
-          std::string path;
-          if (ShowSaveSceneDialog(window.NativeHandle(), path)) {
-            DoSaveTo(path);
-          }
+          saveDialogPrefill.clear();
+          saveDialogQueued = true;
+          afterSaveRunPending = false;
         } else {
           DoSaveTo(currentPath);
         }
       }
       if (ImGui::MenuItem("Save As...")) {
-        std::string path = currentPath;
-        if (ShowSaveSceneDialog(window.NativeHandle(), path)) {
-          DoSaveTo(path);
-        }
+        saveDialogPrefill = currentPath;
+        saveDialogQueued = true;
+        afterSaveRunPending = false;
       }
       if (ImGui::MenuItem("Exit")) {
         RequestAction(3);
@@ -324,12 +326,36 @@ void EditorApp::RunPendingAction() {
   if (action == 1) {
     DoNewScene();
   } else if (action == 2) {
+    openDialogQueued = true;
+  } else if (action == 3) {
+    running = false;
+  }
+}
+void EditorApp::ProcessQueuedDialogs() {
+  if (openDialogQueued) {
+    openDialogQueued = false;
     std::string path;
     if (ShowOpenSceneDialog(window.NativeHandle(), path)) {
       DoOpenPath(path);
+    } else if (GetLastDialogError() != 0) {
+      log.Add(LogLevel::Error, std::string("Open dialog failed: ") + std::to_string(GetLastDialogError()));
     }
-  } else if (action == 3) {
-    running = false;
+  }
+  if (saveDialogQueued) {
+    saveDialogQueued = false;
+    std::string path = saveDialogPrefill;
+    if (ShowSaveSceneDialog(window.NativeHandle(), path)) {
+      DoSaveTo(path);
+      if (afterSaveRunPending) {
+        afterSaveRunPending = false;
+        RunPendingAction();
+      }
+    } else {
+      afterSaveRunPending = false;
+      if (GetLastDialogError() != 0) {
+        log.Add(LogLevel::Error, std::string("Save dialog failed: ") + std::to_string(GetLastDialogError()));
+      }
+    }
   }
 }
 void EditorApp::DoNewScene() {
@@ -360,13 +386,13 @@ void EditorApp::DrawSavePrompt() {
   if (ImGui::BeginPopupModal("Unsaved Changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::Text("Save changes before continuing?");
     if (ImGui::Button("Save")) {
-      std::string path = currentPath;
-      bool picked = !path.empty();
-      if (path.empty()) {
-        picked = ShowSaveSceneDialog(window.NativeHandle(), path);
-      }
-      if (picked) {
-        DoSaveTo(path);
+      if (currentPath.empty()) {
+        saveDialogPrefill.clear();
+        saveDialogQueued = true;
+        afterSaveRunPending = true;
+        ImGui::CloseCurrentPopup();
+      } else {
+        DoSaveTo(currentPath);
         ImGui::CloseCurrentPopup();
         RunPendingAction();
       }

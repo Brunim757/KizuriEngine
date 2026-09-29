@@ -92,7 +92,7 @@ void EditorApp::DrawViewport() {
   if (ImGui::RadioButton("Scale", curOp == ImGuizmo::SCALE)) {
     gizmoOp = static_cast<int>(ImGuizmo::SCALE);
   }
-  if (ImGui::IsWindowHovered() && !ImGui::GetIO().WantTextInput) {
+  if (ImGui::IsWindowHovered() && !ImGui::GetIO().WantTextInput && !RawInputPoll::IsMouseDown(VK_RBUTTON)) {
     if (ImGui::IsKeyPressed(ImGuiKey_W, false)) {
       gizmoOp = static_cast<int>(ImGuizmo::TRANSLATE);
     }
@@ -294,6 +294,7 @@ void EditorApp::DrawHierarchy() {
   }
   ImGui::Separator();
   std::vector<EntityId> all = scene.All();
+  bool itemMenu = false;
   for (size_t i = 0; i < all.size(); ++i) {
     Entity* e = scene.Get(all[i]);
     if (e == nullptr) {
@@ -323,6 +324,7 @@ void EditorApp::DrawHierarchy() {
       }
     }
     if (ImGui::BeginPopupContextItem("EntityContext")) {
+      itemMenu = true;
       if (ImGui::MenuItem("Create Entity")) {
         CreateEntityAt(0.0f, 0.0f, 0.0f);
       }
@@ -350,7 +352,7 @@ void EditorApp::DrawHierarchy() {
     }
     ImGui::PopID();
   }
-  if (ImGui::BeginPopupContextWindow("HierarchyContext")) {
+  if (!itemMenu && ImGui::BeginPopupContextWindow("HierarchyContext")) {
     if (ImGui::MenuItem("Create Entity")) {
       CreateEntityAt(0.0f, 0.0f, 0.0f);
     }
