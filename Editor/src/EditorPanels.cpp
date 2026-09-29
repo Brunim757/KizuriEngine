@@ -89,6 +89,9 @@ void EditorApp::DrawViewport() {
   viewW = iw;
   viewH = ih;
   viewValid = true;
+  ImDrawList* vdl = ImGui::GetWindowDrawList();
+  vdl->ChannelsSplit(2);
+  vdl->ChannelsSetCurrent(1);
   if (selection.HasSelection()) {
     Entity* e = scene.Get(selection.Get());
     if (e != nullptr) {
@@ -112,6 +115,7 @@ void EditorApp::DrawViewport() {
       selection.Clear();
     }
   }
+  vdl->ChannelsSetCurrent(0);
   void* tex = renderer.IsReady() ? renderer.GetViewportTexture() : nullptr;
   if (tex != nullptr) {
     ImGui::Image(reinterpret_cast<ImTextureID>(tex), ImVec2(iw, ih));
@@ -244,6 +248,7 @@ void EditorApp::DrawViewport() {
     }
     ImGui::EndPopup();
   }
+  vdl->ChannelsMerge();
   ImGui::End();
 }
 void EditorApp::DrawHierarchy() {
