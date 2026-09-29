@@ -9,6 +9,7 @@
 #include <ImGuizmo.h>
 #include <DirectXMath.h>
 #include <cstdio>
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 namespace Kizuri {
 EditorApp::EditorApp()
   : rhi(nullptr)
