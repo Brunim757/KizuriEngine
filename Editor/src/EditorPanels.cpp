@@ -253,12 +253,6 @@ void EditorApp::DrawViewport() {
     }
     ImGui::EndPopup();
   }
-  {
-    ImGuiIO& dio = ImGui::GetIO();
-    int selIdx = selection.HasSelection() ? static_cast<int>(selection.Get().index) : -1;
-    ImGui::SetCursorScreenPos(ImVec2(viewX + 6.0f, viewY + 6.0f));
-    ImGui::Text("L:%d R:%d hov:%d act:%d over:%d using:%d sel:%d", dio.MouseDown[0] ? 1 : 0, dio.MouseDown[1] ? 1 : 0, ImGui::IsAnyItemHovered() ? 1 : 0, ImGui::IsAnyItemActive() ? 1 : 0, ImGuizmo::IsOver() ? 1 : 0, ImGuizmo::IsUsing() ? 1 : 0, selIdx);
-  }
   vdl->ChannelsMerge();
   ImGui::End();
 }
