@@ -37,6 +37,10 @@ struct EditorApp {
   bool downPosValid;
   int downX;
   int downY;
+  int rdownX;
+  int rdownY;
+  bool rdownValid;
+  EntityId contextPick;
   char renameBuf[128];
   bool renameActive;
   EntityId renameTarget;

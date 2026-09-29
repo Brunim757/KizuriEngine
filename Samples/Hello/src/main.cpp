@@ -389,6 +389,13 @@ bool TestDeferredNull() {  Kizuri::IRHI* rhi = Kizuri::CreateRHI(Kizuri::RHI_API
     Kizuri::DestroyRHI(rhi);
     return false;
   }
+  float ident[16] = { 1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1 };
+  renderer.BeginObjects(view, proj);
+  renderer.DrawObject(ident);
+  renderer.DrawObject(ident);
+  renderer.EndObjectsToTexture(cam);
+  renderer.BeginObjects(view, proj);
+  renderer.EndObjectsToBackbuffer(cam);
   renderer.Shutdown();
   rhi->Shutdown();
   Kizuri::DestroyRHI(rhi);

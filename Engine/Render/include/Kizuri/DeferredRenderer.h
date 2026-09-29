@@ -27,6 +27,10 @@ public:
   void Render(const float view[16], const float proj[16], const float camPos[3]);
   void RenderToTexture(const float view[16], const float proj[16], const float camPos[3]);
   void* GetViewportTexture();
+  void BeginObjects(const float view[16], const float proj[16]);
+  void DrawObject(const float world[16]);
+  void EndObjectsToTexture(const float camPos[3]);
+  void EndObjectsToBackbuffer(const float camPos[3]);
   bool IsReady() const;
 private:
   IRHI* rhi;
@@ -52,12 +56,16 @@ private:
   uint32_t indexCount;
   float viewX;
   float viewY;
+  bool begun;
+  float lastView[16];
+  float lastProj[16];
   bool ready;
   DeferredMaterial material;
   DeferredLight light;
   bool CreateTargets();
   void DestroyTargets();
   void RenderInternal(const float view[16], const float proj[16], const float camPos[3], bool toTexture);
+  void EndInternal(const float camPos[3], bool toTexture);
   DeferredRenderer(const DeferredRenderer&) = delete;
   DeferredRenderer& operator=(const DeferredRenderer&) = delete;
 };

@@ -45,7 +45,18 @@ void EditorApp::RenderScene() {
   float cpz = 0.0f;
   camera.GetPosition(cpx, cpy, cpz);
   float cpos[3] = { cpx, cpy, cpz };
-  renderer.RenderToTexture(&vf.m[0][0], &pf.m[0][0], cpos);
+  renderer.BeginObjects(&vf.m[0][0], &pf.m[0][0]);
+  std::vector<EntityId> ids = scene.All();
+  for (size_t i = 0; i < ids.size(); ++i) {
+    const Entity* e = scene.Get(ids[i]);
+    if (e == nullptr) {
+      continue;
+    }
+    float world[16];
+    ComposeMatrix(e->transform, world);
+    renderer.DrawObject(world);
+  }
+  renderer.EndObjectsToTexture(cpos);
   rhi->Clear(0.03f, 0.03f, 0.04f, 1.0f);
 }
 void EditorApp::HandleViewportClick() {
@@ -128,27 +139,39 @@ void EditorApp::DrawViewport() {
     }
     downPosValid = false;
   }
-  EntityId rightPick = EntityId::Invalid();
   if (canvasHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
-    DirectX::XMMATRIX view = camera.View();
-    float aspect = viewW / viewH;
-    DirectX::XMMATRIX proj = camera.Projection(aspect);
-    DirectX::XMFLOAT4X4 vf;
-    DirectX::XMFLOAT4X4 pf;
-    DirectX::XMStoreFloat4x4(&vf, view);
-    DirectX::XMStoreFloat4x4(&pf, proj);
-    ImVec2 mp = ImGui::GetMousePos();
-    float origin[3];
-    float dir[3];
-    ScreenPointRay(mp.x - viewX, mp.y - viewY, viewW, viewH, &vf.m[0][0], &pf.m[0][0], origin, dir);
-    rightPick = PickFirst(scene, origin, dir);
-    if (rightPick.IsValid()) {
-      selection.Select(rightPick);
+    rdownX = static_cast<int>(ImGui::GetMousePos().x);
+    rdownY = static_cast<int>(ImGui::GetMousePos().y);
+    rdownValid = true;
+  }
+  if (rdownValid && ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
+    int ux = static_cast<int>(ImGui::GetMousePos().x);
+    int uy = static_cast<int>(ImGui::GetMousePos().y);
+    int rdx = ux - rdownX;
+    int rdy = uy - rdownY;
+    rdownValid = false;
+    if (rdx * rdx + rdy * rdy < 25 && canvasHovered) {
+      DirectX::XMMATRIX view = camera.View();
+      float aspect = viewW / viewH;
+      DirectX::XMMATRIX proj = camera.Projection(aspect);
+      DirectX::XMFLOAT4X4 vf;
+      DirectX::XMFLOAT4X4 pf;
+      DirectX::XMStoreFloat4x4(&vf, view);
+      DirectX::XMStoreFloat4x4(&pf, proj);
+      ImVec2 mp = ImGui::GetMousePos();
+      float origin[3];
+      float dir[3];
+      ScreenPointRay(mp.x - viewX, mp.y - viewY, viewW, viewH, &vf.m[0][0], &pf.m[0][0], origin, dir);
+      contextPick = PickFirst(scene, origin, dir);
+      if (contextPick.IsValid()) {
+        selection.Select(contextPick);
+      }
+      ImGui::OpenPopup("ViewportContext");
     }
   }
-  if (ImGui::BeginPopupContextWindow("ViewportContext")) {
-    if (rightPick.IsValid() || selection.HasSelection()) {
-      EntityId target = rightPick.IsValid() ? rightPick : selection.Get();
+  if (ImGui::BeginPopup("ViewportContext")) {
+    if (contextPick.IsValid() || selection.HasSelection()) {
+      EntityId target = contextPick.IsValid() ? contextPick : selection.Get();
       const Entity* e = scene.Get(target);
       if (e != nullptr) {
         ImGui::Text("%s", e->name.c_str());

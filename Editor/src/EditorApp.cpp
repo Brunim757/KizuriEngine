@@ -30,6 +30,10 @@ EditorApp::EditorApp()
   , downPosValid(false)
   , downX(0)
   , downY(0)
+  , rdownX(0)
+  , rdownY(0)
+  , rdownValid(false)
+  , contextPick(EntityId::Invalid())
   , renameActive(false)
   , renameTarget(EntityId::Invalid()) {
   renameBuf[0] = '\0';

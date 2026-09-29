@@ -42,6 +42,7 @@ DeferredRenderer::DeferredRenderer()
   , indexCount(0)
   , viewX(0.0f)
   , viewY(0.0f)
+  , begun(false)
   , ready(false) {
   material.albedo[0] = 0.8f;
   material.albedo[1] = 0.2f;
@@ -206,10 +207,13 @@ void* DeferredRenderer::GetViewportTexture() {
   }
   return rhi->GetRenderTargetSRV(gViewport);
 }
-void DeferredRenderer::RenderInternal(const float view[16], const float proj[16], const float camPos[3], bool toTexture) {
-  if (!ready || rhi == nullptr || vb == 0 || ib == 0) {
+void DeferredRenderer::BeginObjects(const float view[16], const float proj[16]) {
+  begun = false;
+  if (!ready || rhi == nullptr) {
     return;
   }
+  std::memcpy(lastView, view, sizeof(lastView));
+  std::memcpy(lastProj, proj, sizeof(lastProj));
   RHIRenderTarget mrts[4] = { gAlbedo, gNormalRough, gMetallic, gPosition };
   rhi->SetRenderTargets(4, mrts, gDepth);
   rhi->ClearRenderTarget(gAlbedo, 0.02f, 0.02f, 0.03f, 1.0f);
@@ -243,14 +247,6 @@ void DeferredRenderer::RenderInternal(const float view[16], const float proj[16]
   rhi->SetPixelShader(geoPS);
   rhi->SetVertexBuffer(vb, 0);
   rhi->SetIndexBuffer(ib);
-  GeoConstants gc;
-  gc.world[0] = 1.0f; gc.world[1] = 0.0f; gc.world[2] = 0.0f; gc.world[3] = 0.0f;
-  gc.world[4] = 0.0f; gc.world[5] = 1.0f; gc.world[6] = 0.0f; gc.world[7] = 0.0f;
-  gc.world[8] = 0.0f; gc.world[9] = 0.0f; gc.world[10] = 1.0f; gc.world[11] = 0.0f;
-  gc.world[12] = 0.0f; gc.world[13] = 0.0f; gc.world[14] = 0.0f; gc.world[15] = 1.0f;
-  std::memcpy(gc.view, view, sizeof(gc.view));
-  std::memcpy(gc.proj, proj, sizeof(gc.proj));
-  rhi->UpdateConstantBuffer(geoCB, &gc, sizeof(gc));
   rhi->SetVertexConstantBuffer(0, geoCB);
   MatConstants mc;
   mc.albedo[0] = material.albedo[0];
@@ -263,7 +259,40 @@ void DeferredRenderer::RenderInternal(const float view[16], const float proj[16]
   mc.params[3] = 0.0f;
   rhi->UpdateConstantBuffer(matCB, &mc, sizeof(mc));
   rhi->SetPixelConstantBuffer(0, matCB);
+  begun = true;
+}
+void DeferredRenderer::DrawObject(const float world[16]) {
+  if (!begun || vb == 0 || ib == 0 || world == nullptr) {
+    return;
+  }
+  GeoConstants gc;
+  std::memcpy(gc.world, world, sizeof(gc.world));
+  std::memcpy(gc.view, lastView, sizeof(gc.view));
+  std::memcpy(gc.proj, lastProj, sizeof(gc.proj));
+  rhi->UpdateConstantBuffer(geoCB, &gc, sizeof(gc));
   rhi->DrawIndexed(indexCount, 0, 0);
+}
+void DeferredRenderer::EndObjectsToTexture(const float camPos[3]) {
+  EndInternal(camPos, true);
+}
+void DeferredRenderer::EndObjectsToBackbuffer(const float camPos[3]) {
+  EndInternal(camPos, false);
+}
+void DeferredRenderer::RenderInternal(const float view[16], const float proj[16], const float camPos[3], bool toTexture) {
+  BeginObjects(view, proj);
+  float identity[16] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f };
+  DrawObject(identity);
+  if (toTexture) {
+    EndObjectsToTexture(camPos);
+  } else {
+    EndObjectsToBackbuffer(camPos);
+  }
+}
+void DeferredRenderer::EndInternal(const float camPos[3], bool toTexture) {
+  if (!begun) {
+    return;
+  }
+  begun = false;
   if (toTexture) {
     rhi->SetRenderTargets(1, &gViewport, 0);
   } else {
