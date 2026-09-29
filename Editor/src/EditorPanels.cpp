@@ -98,6 +98,8 @@ void EditorApp::DrawViewport() {
   ImGui::SetCursorScreenPos(ipos);
   ImGui::InvisibleButton("ViewCanvas", ImVec2(iw, ih));
   bool canvasHovered = ImGui::IsItemHovered();
+  bool lookNow = canvasHovered && RawInputPoll::IsMouseDown(VK_RBUTTON);
+  UpdateCamera(frameDt, lookNow);
   if (ImGui::BeginDragDropTarget()) {
     const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("KZ_MESH");
     if (payload != nullptr) {
@@ -233,8 +235,7 @@ void EditorApp::DrawViewport() {
       ImGuizmo::RecomposeMatrixFromComponents(e->transform.position, e->transform.rotation, e->transform.scale, matrix);
       ImGuizmo::SetDrawlist(ImGui::GetWindowDrawList());
       ImGuizmo::SetRect(viewX, viewY, viewW, viewH);
-      ImGuizmo::Manipulate(&vf.m[0][0], &pf.m[0][0], ImGuizmo::TRANSLATE, ImGuizmo::WORLD, matrix);
-      if (ImGuizmo::IsUsing()) {
+      if (ImGuizmo::Manipulate(&vf.m[0][0], &pf.m[0][0], ImGuizmo::TRANSLATE, ImGuizmo::WORLD, matrix)) {
         Transform t = e->transform;
         ImGuizmo::DecomposeMatrixToComponents(matrix, t.position, t.rotation, t.scale);
         scene.SetTransform(e->id, t);

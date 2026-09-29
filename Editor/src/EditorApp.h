@@ -32,6 +32,7 @@ struct EditorApp {
   float viewW;
   float viewH;
   bool viewValid;
+  float frameDt;
   int lastMouseX;
   int lastMouseY;
   bool downPosValid;
@@ -55,7 +56,7 @@ struct EditorApp {
   void DrawInspector();
   void DrawConsole();
   void RenderScene();
-  void UpdateCamera(float dt);
+  void UpdateCamera(float dt, bool lookNow);
   void HandleViewportClick();
   void CreateEntityAt(float x, float y, float z);
   void FocusEntity(EntityId id);

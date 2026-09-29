@@ -25,6 +25,7 @@ EditorApp::EditorApp()
   , viewW(1280.0f)
   , viewH(720.0f)
   , viewValid(false)
+  , frameDt(0.016f)
   , lastMouseX(0)
   , lastMouseY(0)
   , downPosValid(false)
@@ -148,7 +149,7 @@ int EditorApp::Run() {
     }
     edits.ApplyAll(scene);
     RawInputPoll::Poll();
-    UpdateCamera(dt);
+    frameDt = dt;
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
@@ -161,7 +162,7 @@ int EditorApp::Run() {
   }
   return 0;
 }
-void EditorApp::UpdateCamera(float dt) {
+void EditorApp::UpdateCamera(float dt, bool lookNow) {
   if (!viewValid) {
     return;
   }
@@ -173,7 +174,6 @@ void EditorApp::UpdateCamera(float dt) {
   int mdy = my - lastMouseY;
   lastMouseX = mx;
   lastMouseY = my;
-  bool look = RawInputPoll::IsMouseDown(VK_RBUTTON) && ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
   if (io.WantTextInput) {
     return;
   }
@@ -185,8 +185,8 @@ void EditorApp::UpdateCamera(float dt) {
     RawInputPoll::IsKeyDown(0x44),
     RawInputPoll::IsKeyDown(0x45),
     RawInputPoll::IsKeyDown(0x51),
-    look ? static_cast<float>(mdx) : 0.0f,
-    look ? static_cast<float>(mdy) : 0.0f);
+    lookNow ? static_cast<float>(mdx) : 0.0f,
+    lookNow ? static_cast<float>(mdy) : 0.0f);
 }
 void EditorApp::CreateEntityAt(float x, float y, float z) {
   EntityId id = scene.CreateEntity("Entity");
