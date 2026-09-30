@@ -6,6 +6,7 @@
 #include "Kizuri/Undo.h"
 #include "Kizuri/Autosave.h"
 #include "Kizuri/Notifications.h"
+#include "Kizuri/Assets/AssetDatabase.h"
 #include "Kizuri/Window.h"
 #include "Kizuri/RHI.h"
 #include "Kizuri/Camera.h"
@@ -22,6 +23,7 @@ struct EditorApp {
   SelectionSet selection;
   LogStore log;
   NotificationCenter notifications;
+  AssetDatabase assets;
   bool showNotifHistory;
   EditQueue edits;
   UndoStack undo;
@@ -41,6 +43,7 @@ struct EditorApp {
   bool showInspector;
   bool showConsole;
   bool showViewport;
+  bool showAssetBrowser;
   bool showAbout;
   float viewX;
   float viewY;
@@ -62,6 +65,18 @@ struct EditorApp {
   char renameBuf[128];
   bool renameActive;
   EntityId renameTarget;
+  char assetRenameBuf[256];
+  std::string assetRenameGuid;
+  bool assetRenameIsTex;
+  bool assetRenameActive;
+  std::string selectedAssetGuid;
+  bool selectedAssetIsTex;
+  std::string forceDeleteGuid;
+  bool forceDeleteIsTex;
+  RHIBuffer defaultVB;
+  RHIBuffer defaultIB;
+  uint32_t defaultCount;
+  double scanTimer;
   std::string currentPath;
   bool titleDirtyShown;
   std::string titlePathShown;
@@ -88,11 +103,18 @@ struct EditorApp {
   void DrawConsole();
   void DrawToasts();
   void Announce(LogLevel level, const std::string& text);
+  void DrawAssetBrowser();
+  void DrawMeshSection(Entity* e);
+  std::string ResolveAssetsDir();
+  std::vector<RefUse> SceneMeshRefs();
+  void PumpAssets();
+  void UploadDefaultCube();
+  void HandleOsDrop(void* hwnd);
   void RenderScene();
   void UpdateCamera(float dt, bool lookNow);
   void HandleViewportClick();
   void HandleRubberSelect(float x0, float y0, float x1, float y1);
-  void CreateEntityAt(float x, float y, float z);
+  void CreateEntityAt(float x, float y, float z, const std::string& meshGuid = "");
   void FocusEntity(EntityId id);
   void RefreshTitle();
   void RequestAction(int action);

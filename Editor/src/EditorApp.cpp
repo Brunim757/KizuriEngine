@@ -12,6 +12,7 @@
 #include <DirectXMath.h>
 #include <cstdio>
 #include <filesystem>
+#include <shellapi.h>
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 namespace Kizuri {
 EditorApp::EditorApp()
@@ -22,6 +23,7 @@ EditorApp::EditorApp()
   , showInspector(true)
   , showConsole(true)
   , showViewport(true)
+  , showAssetBrowser(true)
   , showAbout(false)
   , viewX(0.0f)
   , viewY(0.0f)
@@ -51,6 +53,15 @@ EditorApp::EditorApp()
   , restorePromptQueued(false) {
   renameBuf[0] = '\0';
   showNotifHistory = false;
+  assetRenameBuf[0] = '\0';
+  assetRenameActive = false;
+  assetRenameIsTex = false;
+  selectedAssetIsTex = false;
+  forceDeleteIsTex = false;
+  defaultVB = 0;
+  defaultIB = 0;
+  defaultCount = 0;
+  scanTimer = 0.0;
   MakeIdentityTransform(gizmoStart);
   gizmoTarget = EntityId::Invalid();
   gizmoJustEnded = false;
@@ -70,6 +81,149 @@ std::string EditorApp::FindShaderDir() {
   }
   return "Shaders";
 }
+std::string EditorApp::ResolveAssetsDir() {
+  const char* dirs[4] = { "Assets", "Samples/Assets", "../Samples/Assets", "../../Samples/Assets" };
+  for (int i = 0; i < 4; ++i) {
+    std::error_code ec;
+    if (std::filesystem::is_directory(dirs[i], ec) && !ec) {
+      return std::filesystem::absolute(dirs[i], ec).string();
+    }
+  }
+  return std::filesystem::absolute("Assets").string();
+}
+std::vector<RefUse> EditorApp::SceneMeshRefs() {
+  std::vector<RefUse> refs;
+  std::vector<EntityId> all = scene.All();
+  for (size_t i = 0; i < all.size(); ++i) {
+    const Entity* e = scene.Get(all[i]);
+    if (e != nullptr && !e->meshGuid.empty()) {
+      RefUse r;
+      r.userLabel = e->name;
+      r.assetGuid = e->meshGuid;
+      refs.push_back(r);
+    }
+  }
+  return refs;
+}
+void EditorApp::UploadDefaultCube() {
+  if (!cubeReady || defaultVB != 0) {
+    return;
+  }
+  size_t vertexCount = cubeMesh.positions.size() / 3;
+  if (vertexCount == 0 || cubeMesh.indices.empty()) {
+    return;
+  }
+  std::vector<float> interleaved;
+  interleaved.reserve(vertexCount * 8);
+  for (size_t i = 0; i < vertexCount; ++i) {
+    interleaved.push_back(cubeMesh.positions[i * 3 + 0]);
+    interleaved.push_back(cubeMesh.positions[i * 3 + 1]);
+    interleaved.push_back(cubeMesh.positions[i * 3 + 2]);
+    interleaved.push_back(cubeMesh.normals[i * 3 + 0]);
+    interleaved.push_back(cubeMesh.normals[i * 3 + 1]);
+    interleaved.push_back(cubeMesh.normals[i * 3 + 2]);
+    interleaved.push_back(cubeMesh.uvs[i * 2 + 0]);
+    interleaved.push_back(cubeMesh.uvs[i * 2 + 1]);
+  }
+  defaultVB = rhi->CreateBuffer(static_cast<uint64_t>(interleaved.size() * sizeof(float)), 32, false, interleaved.data());
+  defaultIB = rhi->CreateBuffer(static_cast<uint64_t>(cubeMesh.indices.size() * 4), 4, true, cubeMesh.indices.data());
+  if (defaultVB == 0 || defaultIB == 0) {
+    if (defaultVB != 0) {
+      rhi->DestroyBuffer(defaultVB);
+      defaultVB = 0;
+    }
+    if (defaultIB != 0) {
+      rhi->DestroyBuffer(defaultIB);
+      defaultIB = 0;
+    }
+    return;
+  }
+  defaultCount = static_cast<uint32_t>(cubeMesh.indices.size());
+}
+void EditorApp::PumpAssets() {
+  scanTimer += frameDt;
+  if (scanTimer >= 2.0) {
+    scanTimer = 0.0;
+    assets.Scan();
+    if (assets.RelocateMissing() > 0) {
+      std::vector<std::string> names = assets.TakeRelocated();
+      std::string msg = "Source relocated: ";
+      for (size_t i = 0; i < names.size(); ++i) {
+        if (i > 0) {
+          msg += ", ";
+        }
+        msg += names[i];
+      }
+      Announce(LogLevel::Info, msg);
+    }
+  }
+  assets.DrainCompleted();
+  float cpx = 0.0f;
+  float cpy = 0.0f;
+  float cpz = 0.0f;
+  camera.GetPosition(cpx, cpy, cpz);
+  float camPos[3] = { cpx, cpy, cpz };
+  std::vector<EntityId> all = scene.All();
+  std::vector<MeshUse> uses;
+  for (size_t i = 0; i < all.size(); ++i) {
+    const Entity* e = scene.Get(all[i]);
+    if (e == nullptr || e->meshGuid.empty()) {
+      continue;
+    }
+    MeshUse u;
+    u.meshGuid = e->meshGuid;
+    u.pos[0] = e->transform.position[0];
+    u.pos[1] = e->transform.position[1];
+    u.pos[2] = e->transform.position[2];
+    uses.push_back(u);
+  }
+  assets.UpdateStreaming(camPos, uses);
+  assets.DrainUploads(rhi, 262144);
+}
+void EditorApp::HandleOsDrop(void* hdrop) {
+  HDROP drop = static_cast<HDROP>(hdrop);
+  UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+  for (UINT i = 0; i < count; ++i) {
+    wchar_t file[1024];
+    if (DragQueryFileW(drop, i, file, 1024) == 0) {
+      continue;
+    }
+    char narrow[1024];
+    int n = WideCharToMultiByte(CP_UTF8, 0, file, -1, narrow, 1024, nullptr, nullptr);
+    if (n <= 1) {
+      continue;
+    }
+    std::string src(narrow);
+    std::string ext;
+    size_t dot = src.find_last_of('.');
+    if (dot != std::string::npos) {
+      ext = src.substr(dot);
+      for (size_t k = 0; k < ext.size(); ++k) {
+        ext[k] = static_cast<char>(tolower(ext[k]));
+      }
+    }
+    if (ext != ".glb" && ext != ".gltf" && ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".tga" && ext != ".bmp" && ext != ".kzmesh" && ext != ".kztex") {
+      Announce(LogLevel::Warning, std::string("Dropped file ignored: ") + src);
+      continue;
+    }
+    size_t slash = src.find_last_of("/\\");
+    std::string name = (slash == std::string::npos) ? src : src.substr(slash + 1);
+    std::string dst = assets.AssetsDir() + "/" + name;
+    int suffix = 1;
+    while (std::filesystem::exists(dst)) {
+      size_t d = name.find_last_of('.');
+      std::string stem = (d == std::string::npos) ? name : name.substr(0, d);
+      std::string dext = (d == std::string::npos) ? "" : name.substr(d);
+      dst = assets.AssetsDir() + "/" + stem + "_" + std::to_string(suffix++) + dext;
+    }
+    if (!CopyFileW(file, std::filesystem::path(dst).wstring().c_str(), TRUE)) {
+      Announce(LogLevel::Error, std::string("Drop copy failed: ") + name);
+      continue;
+    }
+    Announce(LogLevel::Success, std::string("Dropped into Assets: ") + name);
+  }
+  DragFinish(drop);
+}
 std::string EditorApp::FindAsset(const char* name) {
   const char* dirs[4] = { "Assets", "Samples/Assets", "../Assets", "build/bin/Release/Assets" };
   for (int i = 0; i < 4; ++i) {
@@ -86,10 +240,15 @@ bool EditorApp::Initialize() {
   if (!window.Create(L"Kizuri Editor - Fase 3", 1600, 900)) {
     return false;
   }
-  window.SetMessageHook([](void* hwnd, unsigned int msg, unsigned long long wParam, long long lParam) -> long long {
+  window.SetMessageHook([this](void* hwnd, unsigned int msg, unsigned long long wParam, long long lParam) -> long long {
+    if (msg == WM_DROPFILES) {
+      HandleOsDrop(reinterpret_cast<void*>(static_cast<uintptr_t>(lParam)));
+      return 1;
+    }
     LRESULT r = ImGui_ImplWin32_WndProcHandler(static_cast<HWND>(hwnd), msg, static_cast<WPARAM>(wParam), static_cast<LPARAM>(lParam));
     return r != 0 ? 1 : 0;
   });
+  DragAcceptFiles(static_cast<HWND>(window.NativeHandle()), TRUE);
   RawInputPoll::Initialize(window.NativeHandle());
   RHIDesc desc;
   desc.windowHandle = window.NativeHandle();
@@ -143,6 +302,10 @@ bool EditorApp::Initialize() {
   log.Add(LogLevel::Success, "Kizuri Editor ready");
   gizmoOp = static_cast<int>(ImGuizmo::TRANSLATE);
   InitStoragePaths();
+  assets.SetAssetsDir(ResolveAssetsDir());
+  assets.SetGpuRHI(rhi);
+  assets.Scan();
+  UploadDefaultCube();
   OfferRestoreFor(ReadLastScene());
   running = true;
   return true;
@@ -152,6 +315,14 @@ void EditorApp::Shutdown() {
     DeleteRecoveryFile(CurrentRecoveryPath());
   }
   if (rhi != nullptr) {
+    if (defaultVB != 0) {
+      rhi->DestroyBuffer(defaultVB);
+      defaultVB = 0;
+    }
+    if (defaultIB != 0) {
+      rhi->DestroyBuffer(defaultIB);
+      defaultIB = 0;
+    }
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
@@ -177,6 +348,7 @@ int EditorApp::Run() {
       log.Add(LogLevel::Info, "Autosaved");
     }
     notifications.Update(dt);
+    PumpAssets();
     RawInputPoll::Poll();
     frameDt = dt;
     ImGui_ImplDX11_NewFrame();
@@ -217,13 +389,13 @@ void EditorApp::UpdateCamera(float dt, bool lookNow) {
     lookNow ? static_cast<float>(mdx) : 0.0f,
     lookNow ? static_cast<float>(mdy) : 0.0f);
 }
-void EditorApp::CreateEntityAt(float x, float y, float z) {
+void EditorApp::CreateEntityAt(float x, float y, float z, const std::string& meshGuid) {
   Transform t;
   MakeIdentityTransform(t);
   t.position[0] = x;
   t.position[1] = y;
   t.position[2] = z;
-  std::unique_ptr<Command> cmd(new CreateEntityCmd("Entity", t, EntityId::Invalid()));
+  std::unique_ptr<Command> cmd(new CreateEntityCmd("Entity", t, EntityId::Invalid(), meshGuid));
   std::vector<EntityId> beforeIds = scene.All();
   if (!undo.Execute(std::move(cmd), scene)) {
     return;
@@ -347,6 +519,12 @@ void EditorApp::Frame() {
   if (showConsole) {
     DrawConsole();
   }
+  if (showAssetBrowser) {
+    DrawAssetBrowser();
+  }
+  if (showAssetBrowser) {
+    DrawAssetBrowser();
+  }
   if (showAbout) {
     ImGui::Begin("About Kizuri", &showAbout);
     ImGui::Text("Kizuri Engine - Editor Shell Fase 3");
@@ -418,6 +596,8 @@ void EditorApp::DrawMenuBar() {
       ImGui::MenuItem("Hierarchy", nullptr, &showHierarchy);
       ImGui::MenuItem("Inspector", nullptr, &showInspector);
       ImGui::MenuItem("Console", nullptr, &showConsole);
+      ImGui::MenuItem("Asset Browser", nullptr, &showAssetBrowser);
+      ImGui::MenuItem("Asset Browser", nullptr, &showAssetBrowser);
       ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Help")) {

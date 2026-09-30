@@ -272,6 +272,42 @@ void DeferredRenderer::DrawObject(const float world[16]) {
   rhi->UpdateConstantBuffer(geoCB, &gc, sizeof(gc));
   rhi->DrawIndexed(indexCount, 0, 0);
 }
+void DeferredRenderer::DrawObjectEx(const float world[16], RHIBuffer vb, RHIBuffer ib, uint32_t start, uint32_t count, const DeferredMaterial* mat) {
+  if (!begun || world == nullptr || vb == 0 || ib == 0 || count == 0) {
+    return;
+  }
+  GeoConstants gc;
+  std::memcpy(gc.world, world, sizeof(gc.world));
+  std::memcpy(gc.view, lastView, sizeof(gc.view));
+  std::memcpy(gc.proj, lastProj, sizeof(gc.proj));
+  rhi->UpdateConstantBuffer(geoCB, &gc, sizeof(gc));
+  if (mat != nullptr) {
+    MatConstants mc;
+    mc.albedo[0] = mat->albedo[0];
+    mc.albedo[1] = mat->albedo[1];
+    mc.albedo[2] = mat->albedo[2];
+    mc.albedo[3] = 1.0f;
+    mc.params[0] = mat->roughness;
+    mc.params[1] = mat->metallic;
+    mc.params[2] = 0.0f;
+    mc.params[3] = 0.0f;
+    rhi->UpdateConstantBuffer(matCB, &mc, sizeof(mc));
+  } else {
+    MatConstants mc;
+    mc.albedo[0] = material.albedo[0];
+    mc.albedo[1] = material.albedo[1];
+    mc.albedo[2] = material.albedo[2];
+    mc.albedo[3] = 1.0f;
+    mc.params[0] = material.roughness;
+    mc.params[1] = material.metallic;
+    mc.params[2] = 0.0f;
+    mc.params[3] = 0.0f;
+    rhi->UpdateConstantBuffer(matCB, &mc, sizeof(mc));
+  }
+  rhi->SetVertexBuffer(vb, 0);
+  rhi->SetIndexBuffer(ib);
+  rhi->DrawIndexed(count, start, 0);
+}
 void DeferredRenderer::EndObjectsToTexture(const float camPos[3]) {
   EndInternal(camPos, true);
 }

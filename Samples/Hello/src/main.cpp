@@ -2089,6 +2089,205 @@ bool TestGltfTextured() {
   fs::remove_all(dir, ec);
   return true;
 }
+bool TestSetMeshGuid() {
+  Kizuri::Scene scene;
+  Kizuri::UndoStack undo;
+  Kizuri::EntityId a = scene.CreateEntity("A");
+  std::unique_ptr<Kizuri::Command> cmd(new Kizuri::SetMeshGuidCmd(a, "", "mesh-1"));
+  if (!undo.Execute(std::move(cmd), scene) || scene.Get(a)->meshGuid != "mesh-1") {
+    return false;
+  }
+  if (!scene.IsDirty()) {
+    return false;
+  }
+  if (!undo.Undo(scene) || !scene.Get(a)->meshGuid.empty()) {
+    return false;
+  }
+  if (!undo.Redo(scene) || scene.Get(a)->meshGuid != "mesh-1") {
+    return false;
+  }
+  std::unique_ptr<Kizuri::Command> bad(new Kizuri::SetMeshGuidCmd(Kizuri::EntityId::Invalid(), "", "x"));
+  if (undo.Execute(std::move(bad), scene)) {
+    return false;
+  }
+  Kizuri::EntityId b = scene.CreateEntity("B");
+  scene.Get(b)->meshGuid = "mesh-2";
+  std::unique_ptr<Kizuri::Command> del(new Kizuri::DeleteEntityCmd(b));
+  if (!undo.Execute(std::move(del), scene)) {
+    return false;
+  }
+  if (!undo.Undo(scene)) {
+    return false;
+  }
+  const Kizuri::Entity* rb = nullptr;
+  std::vector<Kizuri::EntityId> all = scene.All();
+  for (size_t i = 0; i < all.size(); ++i) {
+    const Kizuri::Entity* e = scene.Get(all[i]);
+    if (e->name == "B") {
+      rb = e;
+    }
+  }
+  return rb != nullptr && rb->meshGuid == "mesh-2";
+}
+bool TestDbTextures() {
+  namespace fs = std::filesystem;
+  fs::path dir = fs::temp_directory_path() / "kzdbtex_test";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  WriteTestBMP((dir / "wall.bmp").string(), 16, 16, false);
+  Kizuri::AssetDatabase db;
+  db.SetAssetsDir(dir.string());
+  db.Scan();
+  db.DrainBlocking();
+  if (db.AllTexGuids().size() != 1) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  std::string tguid = db.AllTexGuids()[0];
+  const Kizuri::TextureRecord* tr = db.GetTexByGuid(tguid);
+  if (tr == nullptr || !tr->loaded || tr->state != Kizuri::TextureAssetState::Ready) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (tr->data.width != 16 || tr->data.mips.size() < 2 || tr->data.format != Kizuri::TexFormat::Bc1) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  db.Scan();
+  db.DrainBlocking();
+  if (db.PendingImports() != 0) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  {
+    FILE* fp = std::fopen((dir / "wall.bmp").string().c_str(), "ab");
+    std::fputs(" ", fp);
+    std::fclose(fp);
+  }
+  fs::copy_file(dir / "wall.bmp", fs::temp_directory_path() / "kzdbtex_backup.bmp", ec);
+  db.Scan();
+  db.DrainBlocking();
+  tr = db.GetTexByGuid(tguid);
+  if (tr == nullptr || tr->state != Kizuri::TextureAssetState::Outdated) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (!db.ReimportTexture(tguid)) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  db.DrainBlocking();
+  tr = db.GetTexByGuid(tguid);
+  if (tr == nullptr || tr->state != Kizuri::TextureAssetState::Ready || db.AllTexGuids()[0] != tguid) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  fs::create_directories(dir / "Sub", ec);
+  fs::copy_file(dir / "wall.bmp", dir / "Sub" / "moved.bmp", ec);
+  fs::remove(dir / "wall.bmp", ec);
+  db.Scan();
+  db.DrainBlocking();
+  tr = db.GetTexByGuid(tguid);
+  if (tr == nullptr || tr->state != Kizuri::TextureAssetState::Ready || tr->sourcePath.find("moved.bmp") == std::string::npos) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  fs::remove(dir / "Sub" / "moved.bmp", ec);
+  db.Scan();
+  db.DrainBlocking();
+  tr = db.GetTexByGuid(tguid);
+  if (tr == nullptr || tr->state != Kizuri::TextureAssetState::SourceMissing) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  fs::copy_file(fs::temp_directory_path() / "kzdbtex_backup.bmp", dir / "Sub" / "moved2.bmp", ec);
+  if (ec) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (!db.SetTexSourcePath(tguid, (dir / "Sub" / "moved2.bmp").string())) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  tr = db.GetTexByGuid(tguid);
+  if (tr == nullptr || tr->state != Kizuri::TextureAssetState::Ready) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (db.SetTexSourcePath(tguid, (dir / "nope.bmp").string())) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  fs::remove(dir / "Sub" / "moved2.bmp", ec);
+  db.Scan();
+  db.DrainBlocking();
+  tr = db.GetTexByGuid(tguid);
+  if (tr == nullptr || tr->state != Kizuri::TextureAssetState::SourceMissing) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  fs::copy_file(fs::temp_directory_path() / "kzdbtex_backup.bmp", dir / "Sub" / "moved.bmp", ec);
+  if (db.RelocateMissing() != 1) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  Kizuri::MeshAssetData mesh;
+  mesh.guid = "texuser-mesh-1";
+  mesh.positions = { 0, 0, 0, 1, 0, 0, 0, 1, 0 };
+  mesh.normals = { 0, 0, 1, 0, 0, 1, 0, 0, 1 };
+  mesh.uvs = { 0, 0, 1, 0, 0, 1 };
+  mesh.indices = { 0, 1, 2 };
+  Kizuri::MeshMaterialData mat;
+  mat.name = "M";
+  mat.albedo[0] = 1.0f;
+  mat.albedo[1] = 1.0f;
+  mat.albedo[2] = 1.0f;
+  mat.metallic = 0.0f;
+  mat.roughness = 0.5f;
+  mat.albedoTexGuid = tguid;
+  mesh.materials.push_back(mat);
+  Kizuri::MeshPartData part;
+  part.indexOffset = 0;
+  part.indexCount = 3;
+  part.material = 0;
+  mesh.parts.push_back(part);
+  mesh.aabbMin[0] = 0.0f;
+  mesh.aabbMin[1] = 0.0f;
+  mesh.aabbMin[2] = 0.0f;
+  mesh.aabbMax[0] = 1.0f;
+  mesh.aabbMax[1] = 1.0f;
+  mesh.aabbMax[2] = 0.0f;
+  mesh.hasSource = false;
+  if (!Kizuri::EncodeMeshFile(mesh, (dir / "user.kzmesh").string())) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  db.Scan();
+  db.DrainBlocking();
+  std::map<std::string, size_t> counts = db.ComputeTexRefCounts();
+  if (counts[tguid] != 1) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  std::vector<std::string> blocked;
+  if (db.DeleteTextureFile(tguid, false, blocked)) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (blocked.size() != 1 || blocked[0] != "user.kzmesh") {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  std::vector<std::string> blocked2;
+  if (!db.DeleteTextureFile(tguid, true, blocked2) || db.GetTexByGuid(tguid) != nullptr) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  fs::remove_all(dir, ec);
+  fs::remove(fs::temp_directory_path() / "kzdbtex_backup.bmp", ec);
+  return true;
+}
 }
 int main() {
   std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -2153,6 +2352,8 @@ int main() {
   failures += Check("RHITextures", TestRHITextures());
   failures += Check("TexStreaming", TestTexStreaming());
   failures += Check("GltfTextured", TestGltfTextured());
+  failures += Check("SetMeshGuid", TestSetMeshGuid());
+  failures += Check("DbTextures", TestDbTextures());
   if (failures == 0) {
     std::printf("KizuriHello: all bootstrap libs linked and functional\n");
   } else {

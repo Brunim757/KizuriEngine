@@ -25,6 +25,7 @@ bool EntitySnapshot::Capture(const Scene& scene, EntityId root) {
     SnapshotNode node;
     node.name = e->name;
     node.transform = e->transform;
+    node.meshGuid = e->meshGuid;
     node.parent = par;
     long idx = static_cast<long>(nodes.size());
     nodes.push_back(node);
@@ -46,6 +47,12 @@ EntityId EntitySnapshot::Restore(Scene& scene, EntityId newParent) const {
       return EntityId::Invalid();
     }
     scene.SetTransform(id, nodes[i].transform);
+    if (!nodes[i].meshGuid.empty()) {
+      Entity* createdEntity = scene.Get(id);
+      if (createdEntity != nullptr) {
+        createdEntity->meshGuid = nodes[i].meshGuid;
+      }
+    }
     created.push_back(id);
   }
   for (size_t i = 1; i < nodes.size(); ++i) {
@@ -58,10 +65,11 @@ EntityId EntitySnapshot::Restore(Scene& scene, EntityId newParent) const {
   }
   return created[0];
 }
-CreateEntityCmd::CreateEntityCmd(const std::string& n, const Transform& t, EntityId p)
+CreateEntityCmd::CreateEntityCmd(const std::string& n, const Transform& t, EntityId p, const std::string& m)
   : name(n)
   , transform(t)
   , parent(p)
+  , mesh(m)
   , live(EntityId::Invalid()) {
 }
 bool CreateEntityCmd::Apply(Scene& scene) {
@@ -71,6 +79,12 @@ bool CreateEntityCmd::Apply(Scene& scene) {
     return false;
   }
   scene.SetTransform(live, transform);
+  if (!mesh.empty()) {
+    Entity* e = scene.Get(live);
+    if (e != nullptr) {
+      e->meshGuid = mesh;
+    }
+  }
   if (useParent.IsValid()) {
     scene.SetParent(live, useParent);
   }
@@ -177,6 +191,32 @@ bool RenameCmd::Revert(Scene& scene) {
 }
 const char* RenameCmd::Name() const {
   return "Rename Entity";
+}
+SetMeshGuidCmd::SetMeshGuidCmd(EntityId t, const std::string& b, const std::string& a)
+  : target(t)
+  , before(b)
+  , after(a) {
+}
+bool SetMeshGuidCmd::Apply(Scene& scene) {
+  Entity* e = scene.Get(target);
+  if (e == nullptr) {
+    return false;
+  }
+  e->meshGuid = after;
+  scene.MarkDirty();
+  return true;
+}
+bool SetMeshGuidCmd::Revert(Scene& scene) {
+  Entity* e = scene.Get(target);
+  if (e == nullptr) {
+    return false;
+  }
+  e->meshGuid = before;
+  scene.MarkDirty();
+  return true;
+}
+const char* SetMeshGuidCmd::Name() const {
+  return "Set Mesh";
 }
 SetParentCmd::SetParentCmd(EntityId c, EntityId b, EntityId a)
   : child(c)

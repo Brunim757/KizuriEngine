@@ -1,14 +1,17 @@
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include "EditorApp.h"
+#include "FileDialog.h"
 #include "Kizuri/Input.h"
 #include "Kizuri/Picking.h"
 #include <windows.h>
+#include <shellapi.h>
 #include <imgui.h>
 #include <ImGuizmo.h>
 #include <DirectXMath.h>
 #include <cstring>
 #include <cmath>
+#include <filesystem>
 namespace Kizuri {
 static Transform s_clipboard;
 static bool s_hasClipboard = false;
@@ -46,6 +49,18 @@ void EditorApp::RenderScene() {
   camera.GetPosition(cpx, cpy, cpz);
   float cpos[3] = { cpx, cpy, cpz };
   renderer.BeginObjects(&vf.m[0][0], &pf.m[0][0]);
+  DeferredMaterial grayMat;
+  grayMat.albedo[0] = 0.4f;
+  grayMat.albedo[1] = 0.4f;
+  grayMat.albedo[2] = 0.45f;
+  grayMat.roughness = 0.9f;
+  grayMat.metallic = 0.0f;
+  DeferredMaterial pinkMat;
+  pinkMat.albedo[0] = 1.0f;
+  pinkMat.albedo[1] = 0.0f;
+  pinkMat.albedo[2] = 1.0f;
+  pinkMat.roughness = 1.0f;
+  pinkMat.metallic = 0.0f;
   std::vector<EntityId> ids = scene.All();
   for (size_t i = 0; i < ids.size(); ++i) {
     const Entity* e = scene.Get(ids[i]);
@@ -54,7 +69,45 @@ void EditorApp::RenderScene() {
     }
     float world[16];
     ComposeMatrix(e->transform, world);
-    renderer.DrawObject(world);
+    if (e->meshGuid.empty()) {
+      if (defaultVB != 0) {
+        renderer.DrawObjectEx(world, defaultVB, defaultIB, 0, defaultCount, nullptr);
+      }
+      continue;
+    }
+    const MeshRecord* rec = assets.GetByGuid(e->meshGuid);
+    if (rec != nullptr && rec->loaded && assets.EnsureMeshGpu(e->meshGuid, 4194304)) {
+      rec = assets.GetByGuid(e->meshGuid);
+      if (rec != nullptr && rec->gpuReady) {
+        if (rec->data.parts.empty()) {
+          renderer.DrawObjectEx(world, rec->gpuVB, rec->gpuIB, 0, rec->gpuCount, nullptr);
+        } else {
+          for (size_t p = 0; p < rec->data.parts.size(); ++p) {
+            const MeshPartData& part = rec->data.parts[p];
+            const DeferredMaterial* useMat = nullptr;
+            DeferredMaterial partMat;
+            if (part.material < rec->data.materials.size()) {
+              const MeshMaterialData& mm = rec->data.materials[part.material];
+              partMat.albedo[0] = mm.albedo[0];
+              partMat.albedo[1] = mm.albedo[1];
+              partMat.albedo[2] = mm.albedo[2];
+              partMat.roughness = mm.roughness;
+              partMat.metallic = mm.metallic;
+              useMat = &partMat;
+            }
+            renderer.DrawObjectEx(world, rec->gpuVB, rec->gpuIB, part.indexOffset, part.indexCount, useMat);
+          }
+        }
+        continue;
+      }
+    }
+    if (defaultVB != 0) {
+      const DeferredMaterial* fallback = &grayMat;
+      if (rec == nullptr) {
+        fallback = &pinkMat;
+      }
+      renderer.DrawObjectEx(world, defaultVB, defaultIB, 0, defaultCount, fallback);
+    }
   }
   renderer.EndObjectsToTexture(cpos);
   rhi->Clear(0.03f, 0.03f, 0.04f, 1.0f);
@@ -313,27 +366,33 @@ void EditorApp::DrawViewport() {
   bool lookNow = canvasHovered && RawInputPoll::IsMouseDown(VK_RBUTTON);
   UpdateCamera(frameDt, lookNow);
   if (showButton && ImGui::BeginDragDropTarget()) {
-    const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("KZ_MESH");
-    if (payload != nullptr) {
-      DirectX::XMMATRIX view = camera.View();
-      float aspect = viewW / viewH;
-      DirectX::XMMATRIX proj = camera.Projection(aspect);
-      DirectX::XMFLOAT4X4 vf;
-      DirectX::XMFLOAT4X4 pf;
-      DirectX::XMStoreFloat4x4(&vf, view);
-      DirectX::XMStoreFloat4x4(&pf, proj);
-      ImVec2 mp = ImGui::GetMousePos();
-      float origin[3];
-      float dir[3];
-      ScreenPointRay(mp.x - viewX, mp.y - viewY, viewW, viewH, &vf.m[0][0], &pf.m[0][0], origin, dir);
-      float t = -1.0f;
-      if (fabsf(dir[1]) > 1e-6f) {
-        t = -origin[1] / dir[1];
-      }
-      if (t > 0.0f) {
-        CreateEntityAt(origin[0] + dir[0] * t, 0.0f, origin[2] + dir[2] * t);
+    const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("KZ_ASSET");
+    if (payload != nullptr && payload->Data != nullptr && payload->DataSize > 0) {
+      std::string guid(static_cast<const char*>(payload->Data));
+      const MeshRecord* rec = assets.GetByGuid(guid);
+      if (rec == nullptr) {
+        Announce(LogLevel::Warning, "Dropped asset not found");
       } else {
-        CreateEntityAt(origin[0] + dir[0] * 5.0f, origin[1] + dir[1] * 5.0f, origin[2] + dir[2] * 5.0f);
+        DirectX::XMMATRIX view = camera.View();
+        float aspect = viewW / viewH;
+        DirectX::XMMATRIX proj = camera.Projection(aspect);
+        DirectX::XMFLOAT4X4 vf;
+        DirectX::XMFLOAT4X4 pf;
+        DirectX::XMStoreFloat4x4(&vf, view);
+        DirectX::XMStoreFloat4x4(&pf, proj);
+        ImVec2 mp = ImGui::GetMousePos();
+        float origin[3];
+        float dir[3];
+        ScreenPointRay(mp.x - viewX, mp.y - viewY, viewW, viewH, &vf.m[0][0], &pf.m[0][0], origin, dir);
+        float t = -1.0f;
+        if (fabsf(dir[1]) > 1e-6f) {
+          t = -origin[1] / dir[1];
+        }
+        if (t > 0.0f) {
+          CreateEntityAt(origin[0] + dir[0] * t, 0.0f, origin[2] + dir[2] * t, guid);
+        } else {
+          CreateEntityAt(origin[0] + dir[0] * 5.0f, origin[1] + dir[1] * 5.0f, origin[2] + dir[2] * 5.0f, guid);
+        }
       }
     }
     ImGui::EndDragDropTarget();
@@ -452,14 +511,6 @@ void EditorApp::DrawViewport() {
 }
 void EditorApp::DrawHierarchy() {
   ImGui::Begin("Hierarchy", &showHierarchy);
-  ImGui::Text("Meshes:");
-  ImGui::Button("Cube Mesh");
-  if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
-    ImGui::SetDragDropPayload("KZ_MESH", "cube", 5);
-    ImGui::Text("Cube Mesh");
-    ImGui::EndDragDropSource();
-  }
-  ImGui::Separator();
   if (ImGui::Button("Create Entity")) {
     CreateEntityAt(0.0f, 0.0f, 0.0f);
   }
@@ -601,6 +652,7 @@ void EditorApp::DrawInspector() {
       Announce(LogLevel::Warning, "Clipboard empty");
     }
   }
+  DrawMeshSection(e);
   ImGui::End();
 }
 void EditorApp::DrawConsole() {
@@ -661,6 +713,273 @@ void EditorApp::DrawConsole() {
     ImGui::SetScrollHereY(1.0f);
   }
   ImGui::EndChild();
+  ImGui::End();
+}
+void EditorApp::DrawMeshSection(Entity* e) {
+  if (e == nullptr) {
+    return;
+  }
+  ImGui::Separator();
+  ImGui::Text("Mesh Renderer");
+  if (e->meshGuid.empty()) {
+    ImGui::Text("Mesh: Default cube");
+  } else {
+    const MeshRecord* rec = assets.GetByGuid(e->meshGuid);
+    if (rec == nullptr) {
+      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
+      ImGui::Text("Missing asset");
+      ImGui::PopStyleColor();
+      ImGui::Text("Drop an asset here to reassign");
+    } else if (!rec->loaded || !rec->gpuReady) {
+      ImGui::Text("Mesh: loading...");
+    } else {
+      std::filesystem::path mp(rec->meshPath);
+      ImGui::Text("Mesh: %s", mp.filename().string().c_str());
+    }
+  }
+  if (ImGui::BeginDragDropTarget()) {
+    const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("KZ_ASSET");
+    if (payload != nullptr && payload->Data != nullptr && payload->DataSize > 0) {
+      std::string guid(static_cast<const char*>(payload->Data));
+      if (assets.GetByGuid(guid) == nullptr) {
+        Announce(LogLevel::Warning, "Dropped asset not found");
+      } else if (guid != e->meshGuid) {
+        std::unique_ptr<Command> cmd(new SetMeshGuidCmd(e->id, e->meshGuid, guid));
+        if (undo.Execute(std::move(cmd), scene)) {
+          log.Add(LogLevel::Info, "Mesh assigned");
+        }
+      }
+    }
+    ImGui::EndDragDropTarget();
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Clear Mesh")) {
+    if (!e->meshGuid.empty()) {
+      std::unique_ptr<Command> cmd(new SetMeshGuidCmd(e->id, e->meshGuid, ""));
+      undo.Execute(std::move(cmd), scene);
+    }
+  }
+}
+void EditorApp::DrawAssetBrowser() {
+  ImGui::Begin("Asset Browser", &showAssetBrowser);
+  if (ImGui::Button("Refresh")) {
+    assets.Scan();
+  }
+  ImGui::SameLine();
+  ImGui::Text("%s", assets.AssetsDir().c_str());
+  if (assets.PendingImports() > 0) {
+    ImGui::SameLine();
+    ImGui::Text("Importing %llu...", (unsigned long long)assets.PendingImports());
+  }
+  ImGui::Separator();
+  ImGui::Text("Meshes:");
+  std::vector<std::string> guids = assets.AllGuids();
+  for (size_t i = 0; i < guids.size(); ++i) {
+    const MeshRecord* rec = assets.GetByGuid(guids[i]);
+    if (rec == nullptr) {
+      continue;
+    }
+    std::filesystem::path mp(rec->meshPath);
+    std::string label = "M " + mp.filename().string();
+    ImGui::PushID(static_cast<int>(i));
+    ImGui::Selectable(label.c_str(), selectedAssetGuid == rec->guid && !selectedAssetIsTex);
+    if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
+      selectedAssetGuid = rec->guid;
+      selectedAssetIsTex = false;
+    }
+    if (rec->state == MeshAssetState::Outdated) {
+      ImGui::SameLine();
+      ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.0f, 1.0f), "[OUTDATED]");
+    } else if (rec->state == MeshAssetState::NoSource) {
+      ImGui::SameLine();
+      ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "[NO SOURCE]");
+    } else if (rec->state == MeshAssetState::SourceMissing) {
+      ImGui::SameLine();
+      ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "[SRC MISSING]");
+    } else if (!rec->loaded) {
+      ImGui::SameLine();
+      ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "[LOADING]");
+    }
+    if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+      ImGui::SetDragDropPayload("KZ_ASSET", rec->guid.c_str(), rec->guid.size() + 1);
+      ImGui::Text("%s", mp.filename().string().c_str());
+      ImGui::EndDragDropSource();
+    }
+    if (ImGui::BeginPopupContextItem("MeshCtx")) {
+      bool canReimport = rec->hasSource;
+      if (ImGui::MenuItem("Reimport", nullptr, false, canReimport)) {
+        if (assets.Reimport(rec->guid)) {
+          Announce(LogLevel::Info, std::string("Reimporting ") + mp.filename().string());
+        } else {
+          Announce(LogLevel::Warning, "No source to reimport from");
+        }
+      }
+      if (ImGui::MenuItem("Rename")) {
+        assetRenameActive = true;
+        assetRenameIsTex = false;
+        assetRenameGuid = rec->guid;
+        std::string fn = mp.filename().string();
+        std::strncpy(assetRenameBuf, fn.c_str(), sizeof(assetRenameBuf) - 1);
+        assetRenameBuf[sizeof(assetRenameBuf) - 1] = '\0';
+      }
+      if (ImGui::MenuItem("Delete")) {
+        std::vector<RefUse> refs = SceneMeshRefs();
+        std::vector<std::string> blocked;
+        if (assets.DeleteAssetFile(rec->guid, false, refs, blocked)) {
+          Announce(LogLevel::Warning, std::string("Deleted ") + mp.filename().string());
+        } else {
+          std::string msg = "Cannot delete '" + mp.filename().string() + "': used by " + std::to_string(blocked.size()) + " (";
+          for (size_t b = 0; b < blocked.size(); ++b) {
+            if (b > 0) {
+              msg += ", ";
+            }
+            msg += blocked[b];
+          }
+          msg += ")";
+          Announce(LogLevel::Error, msg);
+        }
+      }
+      if (ImGui::MenuItem("Force Delete")) {
+        forceDeleteGuid = rec->guid;
+        forceDeleteIsTex = false;
+        ImGui::OpenPopup("Force Delete?");
+      }
+      if (ImGui::MenuItem("Show in folder")) {
+        std::string dir = mp.parent_path().string();
+        ShellExecuteW(nullptr, L"open", std::filesystem::path(dir).wstring().c_str(), nullptr, nullptr, SW_SHOW);
+      }
+      if (rec->state == MeshAssetState::SourceMissing) {
+        if (ImGui::MenuItem("Locate source...")) {
+          std::string picked;
+          if (ShowOpenGltfDialog(window.NativeHandle(), picked)) {
+            if (assets.SetSourcePath(rec->guid, picked)) {
+              Announce(LogLevel::Success, "Source relinked");
+            } else {
+              Announce(LogLevel::Error, "Could not relink source");
+            }
+          }
+        }
+      }
+      ImGui::EndPopup();
+    }
+    if (assetRenameActive && !assetRenameIsTex && assetRenameGuid == rec->guid) {
+      ImGui::SetKeyboardFocusHere(0);
+      if (ImGui::InputText("##assetrename", assetRenameBuf, sizeof(assetRenameBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+        if (!assets.RenameAssetFile(rec->guid, assetRenameBuf)) {
+          Announce(LogLevel::Error, "Rename failed");
+        }
+        assetRenameActive = false;
+      }
+    }
+    ImGui::PopID();
+  }
+  ImGui::Separator();
+  ImGui::Text("Textures:");
+  std::vector<std::string> tguids = assets.AllTexGuids();
+  for (size_t i = 0; i < tguids.size(); ++i) {
+    const TextureRecord* rec = assets.GetTexByGuid(tguids[i]);
+    if (rec == nullptr) {
+      continue;
+    }
+    std::filesystem::path tp(rec->texPath);
+    std::string label = "T " + tp.filename().string() + " (" + std::to_string(rec->data.width) + "x" + std::to_string(rec->data.height) + " " + std::to_string(rec->data.mips.size()) + "mip)";
+    ImGui::PushID(static_cast<int>(100000 + i));
+    ImGui::Selectable(label.c_str(), selectedAssetGuid == rec->guid && selectedAssetIsTex);
+    if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
+      selectedAssetGuid = rec->guid;
+      selectedAssetIsTex = true;
+    }
+    if (rec->state == TextureAssetState::Outdated) {
+      ImGui::SameLine();
+      ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.0f, 1.0f), "[OUTDATED]");
+    } else if (rec->state == TextureAssetState::NoSource) {
+      ImGui::SameLine();
+      ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "[NO SOURCE]");
+    } else if (rec->state == TextureAssetState::SourceMissing) {
+      ImGui::SameLine();
+      ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "[SRC MISSING]");
+    } else if (!rec->loaded) {
+      ImGui::SameLine();
+      ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "[LOADING]");
+    }
+    ImGui::SameLine();
+    ImGui::Text("gpu:%d/%llu", rec->residentLevels, (unsigned long long)rec->data.mips.size());
+    if (ImGui::BeginPopupContextItem("TexCtx")) {
+      bool canReimport = rec->hasSource;
+      if (ImGui::MenuItem("Reimport", nullptr, false, canReimport)) {
+        if (assets.ReimportTexture(rec->guid)) {
+          Announce(LogLevel::Info, std::string("Reimporting ") + tp.filename().string());
+        } else {
+          Announce(LogLevel::Warning, "No source to reimport from");
+        }
+      }
+      if (ImGui::MenuItem("Rename")) {
+        assetRenameActive = true;
+        assetRenameIsTex = true;
+        assetRenameGuid = rec->guid;
+        std::string fn = tp.filename().string();
+        std::strncpy(assetRenameBuf, fn.c_str(), sizeof(assetRenameBuf) - 1);
+        assetRenameBuf[sizeof(assetRenameBuf) - 1] = '\0';
+      }
+      if (ImGui::MenuItem("Delete")) {
+        std::vector<std::string> blocked;
+        if (assets.DeleteTextureFile(rec->guid, false, blocked)) {
+          Announce(LogLevel::Warning, std::string("Deleted ") + tp.filename().string());
+        } else {
+          std::string msg = "Cannot delete '" + tp.filename().string() + "': used by " + std::to_string(blocked.size()) + " (";
+          for (size_t b = 0; b < blocked.size(); ++b) {
+            if (b > 0) {
+              msg += ", ";
+            }
+            msg += blocked[b];
+          }
+          msg += ")";
+          Announce(LogLevel::Error, msg);
+        }
+      }
+      if (ImGui::MenuItem("Force Delete")) {
+        forceDeleteGuid = rec->guid;
+        forceDeleteIsTex = true;
+        ImGui::OpenPopup("Force Delete?");
+      }
+      if (ImGui::MenuItem("Show in folder")) {
+        std::string dir = tp.parent_path().string();
+        ShellExecuteW(nullptr, L"open", std::filesystem::path(dir).wstring().c_str(), nullptr, nullptr, SW_SHOW);
+      }
+      ImGui::EndPopup();
+    }
+    if (assetRenameActive && assetRenameIsTex && assetRenameGuid == rec->guid) {
+      ImGui::SetKeyboardFocusHere(0);
+      if (ImGui::InputText("##texrename", assetRenameBuf, sizeof(assetRenameBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
+        if (!assets.RenameTextureFile(rec->guid, assetRenameBuf)) {
+          Announce(LogLevel::Error, "Rename failed");
+        }
+        assetRenameActive = false;
+      }
+    }
+    ImGui::PopID();
+  }
+  if (ImGui::BeginPopupModal("Force Delete?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::Text("Force delete? Dependents will show missing asset.");
+    if (ImGui::Button("Force")) {
+      std::vector<RefUse> refs = SceneMeshRefs();
+      std::vector<std::string> blocked;
+      if (forceDeleteIsTex) {
+        assets.DeleteTextureFile(forceDeleteGuid, true, blocked);
+      } else {
+        assets.DeleteAssetFile(forceDeleteGuid, true, refs, blocked);
+      }
+      Announce(LogLevel::Warning, "Asset force deleted");
+      forceDeleteGuid.clear();
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel")) {
+      forceDeleteGuid.clear();
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
   ImGui::End();
 }
 }

@@ -1,6 +1,7 @@
 #include "Kizuri/Assets/AssetDatabase.h"
 #include "Kizuri/Assets/Guid.h"
 #include "Kizuri/Assets/MeshImporter.h"
+#include "Kizuri/Assets/TexCodec.h"
 #include "Kizuri/Assets/TextureImporter.h"
 #include <cctype>
 #include <cmath>
@@ -88,8 +89,13 @@ void AssetDatabase::RefreshRecordState(MeshRecord& record) {
     return;
   }
   std::error_code ec;
-  if (!std::filesystem::exists(record.sourcePath, ec) || ec) {
+  std::filesystem::file_time_type ft = std::filesystem::last_write_time(record.sourcePath, ec);
+  if (ec) {
     record.state = MeshAssetState::SourceMissing;
+    return;
+  }
+  int64_t ticks = static_cast<int64_t>(ft.time_since_epoch().count());
+  if (ticks == record.lastSeenSourceTime) {
     return;
   }
   uint64_t hash = 0;
@@ -97,6 +103,7 @@ void AssetDatabase::RefreshRecordState(MeshRecord& record) {
     record.state = MeshAssetState::SourceMissing;
     return;
   }
+  record.lastSeenSourceTime = ticks;
   record.state = (hash == record.sourceHash) ? MeshAssetState::Ready : MeshAssetState::Outdated;
 }
 void AssetDatabase::Scan() {
@@ -151,12 +158,14 @@ void AssetDatabase::Scan() {
     }
     MeshRecord* existing = FindByGuid(data.guid);
     if (existing != nullptr) {
+      DropMeshGpu(*existing);
       existing->meshPath = kzmeshFiles[i];
       existing->sourcePath = data.sourcePath;
       existing->sourceHash = data.sourceHash;
       existing->hasSource = data.hasSource;
       existing->data = data;
       existing->loaded = true;
+      existing->lastSeenSourceTime = 0;
       RefreshRecordState(*existing);
     } else {
       MeshRecord record;
@@ -167,6 +176,11 @@ void AssetDatabase::Scan() {
       record.hasSource = data.hasSource;
       record.data = data;
       record.loaded = true;
+      record.lastSeenSourceTime = 0;
+      record.gpuVB = 0;
+      record.gpuIB = 0;
+      record.gpuCount = 0;
+      record.gpuReady = false;
       RefreshRecordState(record);
       records[record.guid] = record;
     }
@@ -248,12 +262,14 @@ void AssetDatabase::Scan() {
     }
     auto existing = texRecords.find(data.guid);
     if (existing != texRecords.end()) {
+      DropTexGpu(existing->second);
       existing->second.texPath = kztexFiles[i];
       existing->second.sourcePath = data.sourcePath;
       existing->second.sourceHash = data.sourceHash;
       existing->second.hasSource = data.hasSource;
       existing->second.data = data;
       existing->second.loaded = true;
+      existing->second.lastSeenSourceTime = 0;
       RefreshTexRecordState(existing->second);
     } else {
       TextureRecord record;
@@ -264,6 +280,7 @@ void AssetDatabase::Scan() {
       record.hasSource = data.hasSource;
       record.data = data;
       record.loaded = true;
+      record.lastSeenSourceTime = 0;
       record.gpu = 0;
       record.residentLevels = 0;
       record.selectedLevels = 0;
@@ -381,8 +398,13 @@ void AssetDatabase::RefreshTexRecordState(TextureRecord& record) {
     return;
   }
   std::error_code ec;
-  if (!std::filesystem::exists(record.sourcePath, ec) || ec) {
+  std::filesystem::file_time_type ft = std::filesystem::last_write_time(record.sourcePath, ec);
+  if (ec) {
     record.state = TextureAssetState::SourceMissing;
+    return;
+  }
+  int64_t ticks = static_cast<int64_t>(ft.time_since_epoch().count());
+  if (ticks == record.lastSeenSourceTime) {
     return;
   }
   uint64_t hash = 0;
@@ -390,6 +412,7 @@ void AssetDatabase::RefreshTexRecordState(TextureRecord& record) {
     record.state = TextureAssetState::SourceMissing;
     return;
   }
+  record.lastSeenSourceTime = ticks;
   record.state = (hash == record.sourceHash) ? TextureAssetState::Ready : TextureAssetState::Outdated;
 }
 void AssetDatabase::UpsertTexResult(const ImportTexResult& result) {
@@ -398,12 +421,14 @@ void AssetDatabase::UpsertTexResult(const ImportTexResult& result) {
   }
   auto existing = texRecords.find(result.data.guid);
   if (existing != texRecords.end()) {
+    DropTexGpu(existing->second);
     existing->second.texPath = result.texPath;
     existing->second.sourcePath = result.data.sourcePath;
     existing->second.sourceHash = result.data.sourceHash;
     existing->second.hasSource = result.data.hasSource;
     existing->second.data = result.data;
     existing->second.loaded = true;
+    existing->second.lastSeenSourceTime = 0;
     RefreshTexRecordState(existing->second);
   } else {
     TextureRecord record;
@@ -414,6 +439,7 @@ void AssetDatabase::UpsertTexResult(const ImportTexResult& result) {
     record.hasSource = result.data.hasSource;
     record.data = result.data;
     record.loaded = true;
+    record.lastSeenSourceTime = 0;
     record.gpu = 0;
     record.residentLevels = 0;
     record.selectedLevels = 0;
@@ -484,12 +510,14 @@ void AssetDatabase::UpsertResult(const ImportResult& result) {
   }
   MeshRecord* existing = FindByGuid(result.data.guid);
   if (existing != nullptr) {
+    DropMeshGpu(*existing);
     existing->meshPath = result.meshPath;
     existing->sourcePath = result.data.sourcePath;
     existing->sourceHash = result.data.sourceHash;
     existing->hasSource = result.data.hasSource;
     existing->data = result.data;
     existing->loaded = true;
+    existing->lastSeenSourceTime = 0;
     RefreshRecordState(*existing);
   } else {
     MeshRecord record;
@@ -500,6 +528,11 @@ void AssetDatabase::UpsertResult(const ImportResult& result) {
     record.hasSource = result.data.hasSource;
     record.data = result.data;
     record.loaded = true;
+    record.lastSeenSourceTime = 0;
+    record.gpuVB = 0;
+    record.gpuIB = 0;
+    record.gpuCount = 0;
+    record.gpuReady = false;
     RefreshRecordState(record);
     records[record.guid] = record;
   }
@@ -672,6 +705,7 @@ bool AssetDatabase::DeleteAssetFile(const std::string& guid, bool force, const s
   if (!blockedBy.empty() && !force) {
     return false;
   }
+  DropMeshGpu(*record);
   std::error_code ec;
   std::filesystem::remove(record->meshPath, ec);
   records.erase(guid);
@@ -725,10 +759,7 @@ bool AssetDatabase::DeleteTextureFile(const std::string& guid, bool force, std::
   if (!blockedBy.empty() && !force) {
     return false;
   }
-  if (it->second.gpu != 0) {
-    it->second.gpu = 0;
-    it->second.residentLevels = 0;
-  }
+  DropTexGpu(it->second);
   std::error_code ec;
   std::filesystem::remove(it->second.texPath, ec);
   texRecords.erase(it);
@@ -858,5 +889,109 @@ size_t AssetDatabase::DrainUploads(IRHI* rhi, size_t maxBytes) {
     ++done;
   }
   return done;
+}
+void AssetDatabase::SetGpuRHI(IRHI* rhi) {
+  gpuRhi = rhi;
+}
+void AssetDatabase::DropMeshGpu(MeshRecord& record) {
+  if (gpuRhi != nullptr) {
+    if (record.gpuVB != 0) {
+      gpuRhi->DestroyBuffer(record.gpuVB);
+    }
+    if (record.gpuIB != 0) {
+      gpuRhi->DestroyBuffer(record.gpuIB);
+    }
+  }
+  record.gpuVB = 0;
+  record.gpuIB = 0;
+  record.gpuCount = 0;
+  record.gpuReady = false;
+}
+void AssetDatabase::DropTexGpu(TextureRecord& record) {
+  if (gpuRhi != nullptr && record.gpu != 0) {
+    gpuRhi->DestroyTexture(record.gpu);
+  }
+  record.gpu = 0;
+  record.residentLevels = 0;
+}
+bool AssetDatabase::EnsureMeshGpu(const std::string& guid, size_t maxBytes) {
+  MeshRecord* record = FindByGuid(guid);
+  if (record == nullptr || !record->loaded || gpuRhi == nullptr) {
+    return false;
+  }
+  if (record->gpuReady) {
+    return true;
+  }
+  size_t vertexCount = record->data.positions.size() / 3;
+  if (vertexCount == 0 || record->data.indices.empty()) {
+    return false;
+  }
+  size_t vbBytes = vertexCount * 32;
+  size_t ibBytes = record->data.indices.size() * 4;
+  if (vbBytes + ibBytes > maxBytes) {
+    return false;
+  }
+  std::vector<float> interleaved;
+  interleaved.reserve(vertexCount * 8);
+  for (size_t i = 0; i < vertexCount; ++i) {
+    interleaved.push_back(record->data.positions[i * 3 + 0]);
+    interleaved.push_back(record->data.positions[i * 3 + 1]);
+    interleaved.push_back(record->data.positions[i * 3 + 2]);
+    interleaved.push_back(record->data.normals[i * 3 + 0]);
+    interleaved.push_back(record->data.normals[i * 3 + 1]);
+    interleaved.push_back(record->data.normals[i * 3 + 2]);
+    interleaved.push_back(record->data.uvs[i * 2 + 0]);
+    interleaved.push_back(record->data.uvs[i * 2 + 1]);
+  }
+  RHIBuffer vb = gpuRhi->CreateBuffer(static_cast<uint64_t>(vbBytes), 32, false, interleaved.data());
+  if (vb == 0) {
+    return false;
+  }
+  RHIBuffer ib = gpuRhi->CreateBuffer(static_cast<uint64_t>(ibBytes), 4, true, record->data.indices.data());
+  if (ib == 0) {
+    gpuRhi->DestroyBuffer(vb);
+    return false;
+  }
+  record->gpuVB = vb;
+  record->gpuIB = ib;
+  record->gpuCount = static_cast<uint32_t>(record->data.indices.size());
+  record->gpuReady = true;
+  return true;
+}
+bool AssetDatabase::SetSourcePath(const std::string& guid, const std::string& newSourcePath) {
+  MeshRecord* record = FindByGuid(guid);
+  if (record == nullptr || newSourcePath.empty()) {
+    return false;
+  }
+  std::error_code ec;
+  if (!std::filesystem::exists(newSourcePath, ec) || ec) {
+    return false;
+  }
+  record->sourcePath = newSourcePath;
+  record->data.sourcePath = newSourcePath;
+  record->hasSource = true;
+  record->data.hasSource = true;
+  record->lastSeenSourceTime = 0;
+  EncodeMeshFile(record->data, record->meshPath);
+  RefreshRecordState(*record);
+  return true;
+}
+bool AssetDatabase::SetTexSourcePath(const std::string& guid, const std::string& newSourcePath) {
+  auto it = texRecords.find(guid);
+  if (it == texRecords.end() || newSourcePath.empty()) {
+    return false;
+  }
+  std::error_code ec;
+  if (!std::filesystem::exists(newSourcePath, ec) || ec) {
+    return false;
+  }
+  it->second.sourcePath = newSourcePath;
+  it->second.data.sourcePath = newSourcePath;
+  it->second.hasSource = true;
+  it->second.data.hasSource = true;
+  it->second.lastSeenSourceTime = 0;
+  EncodeTextureFile(it->second.data, it->second.texPath);
+  RefreshTexRecordState(it->second);
+  return true;
 }
 }

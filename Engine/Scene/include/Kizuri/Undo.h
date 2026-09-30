@@ -13,6 +13,7 @@ struct Command {
 struct SnapshotNode {
   std::string name;
   Transform transform;
+  std::string meshGuid;
   long parent;
 };
 struct EntitySnapshot {
@@ -23,7 +24,7 @@ struct EntitySnapshot {
 };
 class CreateEntityCmd : public Command {
 public:
-  CreateEntityCmd(const std::string& name, const Transform& t, EntityId parent);
+  CreateEntityCmd(const std::string& name, const Transform& t, EntityId parent, const std::string& mesh = "");
   bool Apply(Scene& scene) override;
   bool Revert(Scene& scene) override;
   const char* Name() const override;
@@ -31,6 +32,7 @@ private:
   std::string name;
   Transform transform;
   EntityId parent;
+  std::string mesh;
   EntityId live;
 };
 class DeleteEntityCmd : public Command {
@@ -71,6 +73,17 @@ private:
 class RenameCmd : public Command {
 public:
   RenameCmd(EntityId target, const std::string& before, const std::string& after);
+  bool Apply(Scene& scene) override;
+  bool Revert(Scene& scene) override;
+  const char* Name() const override;
+private:
+  EntityId target;
+  std::string before;
+  std::string after;
+};
+class SetMeshGuidCmd : public Command {
+public:
+  SetMeshGuidCmd(EntityId target, const std::string& before, const std::string& after);
   bool Apply(Scene& scene) override;
   bool Revert(Scene& scene) override;
   const char* Name() const override;

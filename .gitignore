@@ -5,3 +5,6 @@ out/
 *.user
 *.suo
 *.sdf
+*.kzmesh
+*.kztex
+*.autosave.kzscene

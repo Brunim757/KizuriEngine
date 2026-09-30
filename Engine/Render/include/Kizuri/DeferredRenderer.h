@@ -29,6 +29,7 @@ public:
   void* GetViewportTexture();
   void BeginObjects(const float view[16], const float proj[16]);
   void DrawObject(const float world[16]);
+  void DrawObjectEx(const float world[16], RHIBuffer vb, RHIBuffer ib, uint32_t start, uint32_t count, const DeferredMaterial* mat);
   void EndObjectsToTexture(const float camPos[3]);
   void EndObjectsToBackbuffer(const float camPos[3]);
   bool IsReady() const;

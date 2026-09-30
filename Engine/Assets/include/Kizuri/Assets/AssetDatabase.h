@@ -26,6 +26,11 @@ struct MeshRecord {
   MeshAssetState state;
   MeshAssetData data;
   bool loaded;
+  int64_t lastSeenSourceTime;
+  RHIBuffer gpuVB;
+  RHIBuffer gpuIB;
+  uint32_t gpuCount;
+  bool gpuReady;
 };
 struct RefUse {
   std::string userLabel;
@@ -64,6 +69,7 @@ struct TextureRecord {
   TextureAssetState state;
   TextureAssetData data;
   bool loaded;
+  int64_t lastSeenSourceTime;
   RHITexture gpu;
   int residentLevels;
   int selectedLevels;
@@ -109,6 +115,8 @@ public:
   size_t RelocateMissing();
   std::vector<std::string> TakeRelocated();
   bool RenameAssetFile(const std::string& guid, const std::string& newFileName);
+  bool SetSourcePath(const std::string& guid, const std::string& newSourcePath);
+  bool SetTexSourcePath(const std::string& guid, const std::string& newSourcePath);
   bool DeleteAssetFile(const std::string& guid, bool force, const std::vector<RefUse>& refs, std::vector<std::string>& blockedBy);
   std::map<std::string, size_t> ComputeRefCounts(const std::vector<RefUse>& refs) const;
   const TextureRecord* GetTexByGuid(const std::string& guid) const;
@@ -118,9 +126,14 @@ public:
   bool DeleteTextureFile(const std::string& guid, bool force, std::vector<std::string>& blockedBy);
   std::map<std::string, size_t> ComputeTexRefCounts() const;
   static int SelectMipLevel(float dist, int mipCount);
+  void SetGpuRHI(IRHI* rhi);
+  bool EnsureMeshGpu(const std::string& guid, size_t maxBytes);
+  void DropMeshGpu(MeshRecord& record);
+  void DropTexGpu(TextureRecord& record);
   void UpdateStreaming(const float cameraPos[3], const std::vector<MeshUse>& uses);
   size_t DrainUploads(IRHI* rhi, size_t maxBytes);
 private:
+  IRHI* gpuRhi;
   std::string assetsDir;
   std::map<std::string, MeshRecord> records;
   JobSystem jobs;
