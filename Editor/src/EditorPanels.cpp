@@ -192,6 +192,7 @@ void EditorApp::DrawViewport() {
           scene.SetTransform(e->id, t);
         } else if (gizmoDragging) {
           gizmoDragging = false;
+          gizmoJustEnded = true;
           const Entity* cur = scene.Get(gizmoTarget);
           if (cur != nullptr && std::memcmp(&gizmoStart, &cur->transform, sizeof(Transform)) != 0) {
             std::unique_ptr<Command> cmd(new EditTransformCmd(gizmoTarget, gizmoStart, cur->transform));
@@ -272,6 +273,20 @@ void EditorApp::DrawViewport() {
           }
         } else if (gizmoDragging) {
           gizmoDragging = false;
+          gizmoJustEnded = true;
+          MultiEditTransformCmd* multi = new MultiEditTransformCmd();
+          for (auto& kv : gizmoOrigins) {
+            const Entity* cur = scene.Get(kv.first);
+            if (cur != nullptr && std::memcmp(&kv.second, &cur->transform, sizeof(Transform)) != 0) {
+              multi->Add(kv.first, kv.second, cur->transform);
+            }
+          }
+          if (!multi->Empty()) {
+            std::unique_ptr<Command> cmd(multi);
+            undo.Commit(std::move(cmd));
+          } else {
+            delete multi;
+          }
           gizmoOrigins.clear();
         }
       }
@@ -329,14 +344,18 @@ void EditorApp::DrawViewport() {
     downPosValid = true;
   }
   if (downPosValid && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
-    int ux = static_cast<int>(ImGui::GetMousePos().x);
-    int uy = static_cast<int>(ImGui::GetMousePos().y);
-    int dx = ux - downX;
-    int dy = uy - downY;
-    if (dx * dx + dy * dy < 25 && canvasHovered) {
-      HandleViewportClick();
-    } else if (canvasHovered) {
-      HandleRubberSelect(static_cast<float>(downX), static_cast<float>(downY), static_cast<float>(ux), static_cast<float>(uy));
+    if (gizmoJustEnded) {
+      gizmoJustEnded = false;
+    } else {
+      int ux = static_cast<int>(ImGui::GetMousePos().x);
+      int uy = static_cast<int>(ImGui::GetMousePos().y);
+      int dx = ux - downX;
+      int dy = uy - downY;
+      if (dx * dx + dy * dy < 25 && canvasHovered) {
+        HandleViewportClick();
+      } else if (canvasHovered) {
+        HandleRubberSelect(static_cast<float>(downX), static_cast<float>(downY), static_cast<float>(ux), static_cast<float>(uy));
+      }
     }
     downPosValid = false;
     rubberActive = false;

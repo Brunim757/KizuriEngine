@@ -90,6 +90,22 @@ private:
   EntityId before;
   EntityId after;
 };
+struct MultiTransformEdit {
+  EntityId target;
+  Transform before;
+  Transform after;
+};
+class MultiEditTransformCmd : public Command {
+public:
+  MultiEditTransformCmd();
+  void Add(EntityId target, const Transform& before, const Transform& after);
+  bool Empty() const;
+  bool Apply(Scene& scene) override;
+  bool Revert(Scene& scene) override;
+  const char* Name() const override;
+private:
+  std::vector<MultiTransformEdit> edits;
+};
 class UndoStack {
 public:
   UndoStack();

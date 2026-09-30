@@ -1015,6 +1015,88 @@ bool TestUndoStack() {
   }
   return true;
 }
+bool TestUndoMultiMove() {
+  Kizuri::Scene scene;
+  Kizuri::UndoStack undo;
+  Kizuri::EntityId a = scene.CreateEntity("A");
+  Kizuri::EntityId b = scene.CreateEntity("B");
+  Kizuri::EntityId c = scene.CreateEntity("C");
+  Kizuri::Transform ba = scene.Get(a)->transform;
+  Kizuri::Transform bb = scene.Get(b)->transform;
+  Kizuri::Transform bc = scene.Get(c)->transform;
+  Kizuri::Transform na = ba;
+  Kizuri::Transform nb = bb;
+  Kizuri::Transform nc = bc;
+  na.position[0] += 10.0f;
+  nb.position[1] += 10.0f;
+  nc.position[2] += 10.0f;
+  na.rotation[0] += 15.0f;
+  nb.scale[0] *= 2.0f;
+  scene.SetTransform(a, na);
+  scene.SetTransform(b, nb);
+  scene.SetTransform(c, nc);
+  Kizuri::MultiEditTransformCmd* multi = new Kizuri::MultiEditTransformCmd();
+  multi->Add(a, ba, na);
+  multi->Add(b, bb, nb);
+  multi->Add(c, bc, nc);
+  if (multi->Empty()) {
+    delete multi;
+    return false;
+  }
+  std::unique_ptr<Kizuri::Command> cmd(multi);
+  undo.Commit(std::move(cmd));
+  if (!undo.CanUndo()) {
+    return false;
+  }
+  if (scene.Get(a)->transform.position[0] != 10.0f || scene.Get(b)->transform.position[1] != 10.0f || scene.Get(c)->transform.position[2] != 10.0f) {
+    return false;
+  }
+  if (!undo.Undo(scene)) {
+    return false;
+  }
+  if (scene.Get(a)->transform.position[0] != 0.0f || scene.Get(b)->transform.position[1] != 0.0f || scene.Get(c)->transform.position[2] != 0.0f) {
+    return false;
+  }
+  if (scene.Get(a)->transform.rotation[0] != 0.0f || scene.Get(b)->transform.scale[0] != 1.0f) {
+    return false;
+  }
+  if (!undo.Redo(scene)) {
+    return false;
+  }
+  if (scene.Get(a)->transform.position[0] != 10.0f || scene.Get(a)->transform.rotation[0] != 15.0f || scene.Get(b)->transform.scale[0] != 2.0f) {
+    return false;
+  }
+  return true;
+}
+bool TestUndoMultiPartial() {
+  Kizuri::Scene scene;
+  Kizuri::UndoStack undo;
+  Kizuri::EntityId a = scene.CreateEntity("A");
+  Kizuri::EntityId b = scene.CreateEntity("B");
+  Kizuri::Transform ba = scene.Get(a)->transform;
+  Kizuri::Transform bb = scene.Get(b)->transform;
+  Kizuri::Transform na = ba;
+  Kizuri::Transform nb = bb;
+  na.position[0] = 4.0f;
+  nb.position[0] = 8.0f;
+  scene.SetTransform(a, na);
+  scene.SetTransform(b, nb);
+  Kizuri::MultiEditTransformCmd* multi = new Kizuri::MultiEditTransformCmd();
+  multi->Add(a, ba, na);
+  multi->Add(b, bb, nb);
+  std::unique_ptr<Kizuri::Command> cmd(multi);
+  undo.Commit(std::move(cmd));
+  scene.DeleteEntity(b);
+  if (!undo.Undo(scene)) {
+    return false;
+  }
+  if (scene.Get(a)->transform.position[0] != 0.0f) {
+    return false;
+  }
+  if (scene.Has(b)) {
+    return false;
+  }
+  return true;
 }
 int main() {
   std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -1060,6 +1142,8 @@ int main() {
   failures += Check("Undo-Edit", TestUndoEdit());
   failures += Check("Undo-RenameParent", TestUndoRenameParent());
   failures += Check("Undo-Stack", TestUndoStack());
+  failures += Check("Undo-MultiMove", TestUndoMultiMove());
+  failures += Check("Undo-MultiPartial", TestUndoMultiPartial());
   if (failures == 0) {
     std::printf("KizuriHello: all bootstrap libs linked and functional\n");
   } else {

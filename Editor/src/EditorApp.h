@@ -24,6 +24,7 @@ struct EditorApp {
   bool gizmoDragging;
   Transform gizmoStart;
   EntityId gizmoTarget;
+  bool gizmoJustEnded;
   std::unordered_map<EntityId, Transform, EntityIdHash> gizmoOrigins;
   bool rubberActive;
   float rubberX0;

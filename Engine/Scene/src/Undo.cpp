@@ -192,6 +192,42 @@ bool SetParentCmd::Revert(Scene& scene) {
 const char* SetParentCmd::Name() const {
   return "Set Parent";
 }
+MultiEditTransformCmd::MultiEditTransformCmd() {
+}
+void MultiEditTransformCmd::Add(EntityId target, const Transform& before, const Transform& after) {
+  if (!target.IsValid()) {
+    return;
+  }
+  MultiTransformEdit e;
+  e.target = target;
+  e.before = before;
+  e.after = after;
+  edits.push_back(e);
+}
+bool MultiEditTransformCmd::Empty() const {
+  return edits.empty();
+}
+bool MultiEditTransformCmd::Apply(Scene& scene) {
+  size_t done = 0;
+  for (size_t i = 0; i < edits.size(); ++i) {
+    if (scene.SetTransform(edits[i].target, edits[i].after)) {
+      ++done;
+    }
+  }
+  return done > 0;
+}
+bool MultiEditTransformCmd::Revert(Scene& scene) {
+  size_t done = 0;
+  for (size_t i = 0; i < edits.size(); ++i) {
+    if (scene.SetTransform(edits[i].target, edits[i].before)) {
+      ++done;
+    }
+  }
+  return done > 0;
+}
+const char* MultiEditTransformCmd::Name() const {
+  return "Edit Transforms";
+}
 UndoStack::UndoStack() {
 }
 bool UndoStack::Execute(std::unique_ptr<Command> cmd, Scene& scene) {

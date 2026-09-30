@@ -50,6 +50,7 @@ EditorApp::EditorApp()
   renameBuf[0] = '\0';
   MakeIdentityTransform(gizmoStart);
   gizmoTarget = EntityId::Invalid();
+  gizmoJustEnded = false;
   rubberActive = false;
   rubberX0 = 0.0f;
   rubberY0 = 0.0f;
