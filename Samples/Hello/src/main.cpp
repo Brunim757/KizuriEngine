@@ -1098,6 +1098,7 @@ bool TestUndoMultiPartial() {
   }
   return true;
 }
+}
 int main() {
   std::setvbuf(stdout, nullptr, _IONBF, 0);
   std::printf("KizuriHello %s\n", Kizuri::Core_Version());
