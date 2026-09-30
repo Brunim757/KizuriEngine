@@ -522,9 +522,6 @@ void EditorApp::Frame() {
   if (showAssetBrowser) {
     DrawAssetBrowser();
   }
-  if (showAssetBrowser) {
-    DrawAssetBrowser();
-  }
   if (showAbout) {
     ImGui::Begin("About Kizuri", &showAbout);
     ImGui::Text("Kizuri Engine - Editor Shell Fase 3");
@@ -596,7 +593,6 @@ void EditorApp::DrawMenuBar() {
       ImGui::MenuItem("Hierarchy", nullptr, &showHierarchy);
       ImGui::MenuItem("Inspector", nullptr, &showInspector);
       ImGui::MenuItem("Console", nullptr, &showConsole);
-      ImGui::MenuItem("Asset Browser", nullptr, &showAssetBrowser);
       ImGui::MenuItem("Asset Browser", nullptr, &showAssetBrowser);
       ImGui::EndMenu();
     }

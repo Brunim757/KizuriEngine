@@ -70,9 +70,6 @@ void EditorApp::RenderScene() {
     float world[16];
     ComposeMatrix(e->transform, world);
     if (e->meshGuid.empty()) {
-      if (defaultVB != 0) {
-        renderer.DrawObjectEx(world, defaultVB, defaultIB, 0, defaultCount, nullptr);
-      }
       continue;
     }
     const MeshRecord* rec = assets.GetByGuid(e->meshGuid);
@@ -722,7 +719,7 @@ void EditorApp::DrawMeshSection(Entity* e) {
   ImGui::Separator();
   ImGui::Text("Mesh Renderer");
   if (e->meshGuid.empty()) {
-    ImGui::Text("Mesh: Default cube");
+    ImGui::Text("Mesh: (none)");
   } else {
     const MeshRecord* rec = assets.GetByGuid(e->meshGuid);
     if (rec == nullptr) {
