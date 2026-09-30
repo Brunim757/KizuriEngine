@@ -17,7 +17,7 @@ table MaterialSlot {
   roughness:float;
   albedoTexGuid:string;
 }
-table MeshPart {
+struct MeshPart {
   indexOffset:uint;
   indexCount:uint;
   material:uint;

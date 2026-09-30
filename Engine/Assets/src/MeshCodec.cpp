@@ -178,12 +178,12 @@ bool DecodeMeshMemory(const void* bytes, size_t size, MeshAssetData& out) {
   out.indices.resize(indexCount);
   std::memcpy(out.indices.data(), mesh->indexData()->data(), indexCount * 4);
   if (mesh->bounds() != nullptr) {
-    out.aabbMin[0] = mesh->bounds()->min()->x();
-    out.aabbMin[1] = mesh->bounds()->min()->y();
-    out.aabbMin[2] = mesh->bounds()->min()->z();
-    out.aabbMax[0] = mesh->bounds()->max()->x();
-    out.aabbMax[1] = mesh->bounds()->max()->y();
-    out.aabbMax[2] = mesh->bounds()->max()->z();
+    out.aabbMin[0] = mesh->bounds()->min().x();
+    out.aabbMin[1] = mesh->bounds()->min().y();
+    out.aabbMin[2] = mesh->bounds()->min().z();
+    out.aabbMax[0] = mesh->bounds()->max().x();
+    out.aabbMax[1] = mesh->bounds()->max().y();
+    out.aabbMax[2] = mesh->bounds()->max().z();
   }
   if (mesh->materials() != nullptr) {
     for (uint32_t i = 0; i < mesh->materials()->size(); ++i) {
