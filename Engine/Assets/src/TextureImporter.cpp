@@ -46,13 +46,11 @@ bool ImportTextureMemory(const void* bytes, size_t size, const std::string& keep
   std::memcpy(src.GetPixels(), pixels, static_cast<size_t>(w) * static_cast<size_t>(h) * 4);
   stbi_image_free(pixels);
   DirectX::ScratchImage mipChain;
-  DirectX::TEX_FILTER_FLAGS filter = DirectX::TEX_FILTER_DEFAULT;
+  DirectX::TEX_FILTER_FLAGS filter = static_cast<DirectX::TEX_FILTER_FLAGS>(DirectX::TEX_FILTER_DEFAULT | DirectX::TEX_FILTER_FORCE_NON_WIC);
   if (srgb) {
     filter = static_cast<DirectX::TEX_FILTER_FLAGS>(filter | DirectX::TEX_FILTER_SRGB);
   }
-  HRESULT mipHr = DirectX::GenerateMipMaps(src.GetImages(), src.GetImageCount(), src.GetMetadata(), filter, 0, mipChain);
-  std::printf("DIAG mips hr=%08X count=%llu\n", static_cast<unsigned int>(mipHr), (unsigned long long)mipChain.GetImageCount());
-  if (FAILED(mipHr)) {
+  if (FAILED(DirectX::GenerateMipMaps(src.GetImages(), src.GetImageCount(), src.GetMetadata(), filter, 0, mipChain))) {
     return false;
   }
   DXGI_FORMAT destFormat = DXGI_FORMAT_BC1_UNORM;
@@ -68,9 +66,7 @@ bool ImportTextureMemory(const void* bytes, size_t size, const std::string& keep
     outFormat = TexFormat::Bc1;
   }
   DirectX::ScratchImage compressed;
-  HRESULT cmpHr = DirectX::Compress(mipChain.GetImages(), mipChain.GetImageCount(), mipChain.GetMetadata(), destFormat, DirectX::TEX_COMPRESS_DEFAULT, DirectX::TEX_THRESHOLD_DEFAULT, compressed);
-  std::printf("DIAG compress hr=%08X fmt=%d count=%llu\n", static_cast<unsigned int>(cmpHr), static_cast<int>(destFormat), (unsigned long long)compressed.GetImageCount());
-  if (FAILED(cmpHr)) {
+  if (FAILED(DirectX::Compress(mipChain.GetImages(), mipChain.GetImageCount(), mipChain.GetMetadata(), destFormat, DirectX::TEX_COMPRESS_DEFAULT, DirectX::TEX_THRESHOLD_DEFAULT, compressed))) {
     return false;
   }
   out.guid = keepGuid.empty() ? GenerateGuidString() : keepGuid;
