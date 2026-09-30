@@ -46,9 +46,9 @@ bool ImportTextureMemory(const void* bytes, size_t size, const std::string& keep
   std::memcpy(src.GetPixels(), pixels, static_cast<size_t>(w) * static_cast<size_t>(h) * 4);
   stbi_image_free(pixels);
   DirectX::ScratchImage mipChain;
-  uint32_t filter = TEX_FILTER_DEFAULT;
+  DirectX::TEX_FILTER_FLAGS filter = DirectX::TEX_FILTER_DEFAULT;
   if (srgb) {
-    filter |= TEX_FILTER_SRGB;
+    filter = static_cast<DirectX::TEX_FILTER_FLAGS>(filter | DirectX::TEX_FILTER_SRGB);
   }
   if (FAILED(DirectX::GenerateMipMaps(src.GetImages(), src.GetImageCount(), src.GetMetadata(), filter, 0, mipChain))) {
     return false;
@@ -66,7 +66,7 @@ bool ImportTextureMemory(const void* bytes, size_t size, const std::string& keep
     outFormat = TexFormat::Bc1;
   }
   DirectX::ScratchImage compressed;
-  if (FAILED(DirectX::Compress(mipChain.GetImages(), mipChain.GetImageCount(), mipChain.GetMetadata(), destFormat, TEX_COMPRESS_DEFAULT, TEX_THRESHOLD_DEFAULT, compressed))) {
+  if (FAILED(DirectX::Compress(mipChain.GetImages(), mipChain.GetImageCount(), mipChain.GetMetadata(), destFormat, DirectX::TEX_COMPRESS_DEFAULT, DirectX::TEX_THRESHOLD_DEFAULT, compressed))) {
     return false;
   }
   out.guid = keepGuid.empty() ? GenerateGuidString() : keepGuid;
