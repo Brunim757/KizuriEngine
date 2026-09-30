@@ -1731,6 +1731,74 @@ bool TestTexCodec() {
   std::remove(path);
   return ok;
 }
+bool TestTexImportOpaque() {
+  namespace fs = std::filesystem;
+  fs::path dir = fs::temp_directory_path() / "kztexopaque_test";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  std::string opaque = (dir / "brick.bmp").string();
+  WriteTestBMP(opaque, 8, 8, false);
+  Kizuri::TextureAssetData to;
+  if (!Kizuri::ImportTextureFile(opaque, "", to)) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (to.format != Kizuri::TexFormat::Bc1 || !to.srgb || to.mips.size() < 3) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (to.width != 8 || to.mips[0].width != 8 || to.mips.back().width != 1) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  fs::remove_all(dir, ec);
+  return true;
+}
+bool TestTexImportAlpha() {
+  namespace fs = std::filesystem;
+  fs::path dir = fs::temp_directory_path() / "kztexalpha_test";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  std::string alpha = (dir / "glass.bmp").string();
+  WriteTestBMP(alpha, 8, 8, true);
+  Kizuri::TextureAssetData ta;
+  if (!Kizuri::ImportTextureFile(alpha, "", ta)) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (ta.format != Kizuri::TexFormat::Bc3) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  fs::remove_all(dir, ec);
+  return true;
+}
+bool TestTexImportNormal() {
+  namespace fs = std::filesystem;
+  fs::path dir = fs::temp_directory_path() / "kztexnormal_test";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  std::string normal = (dir / "wall_normal.bmp").string();
+  WriteTestBMP(normal, 8, 8, false);
+  Kizuri::TextureAssetData tn;
+  if (!Kizuri::ImportTextureFile(normal, "", tn)) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (tn.format != Kizuri::TexFormat::Bc5 || tn.srgb) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (Kizuri::ImportTextureFile("no_such_file_xyz.bmp", "", tn)) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  fs::remove_all(dir, ec);
+  return true;
+}
 bool TestTexImport() {
   namespace fs = std::filesystem;
   fs::path dir = fs::temp_directory_path() / "kzteximport_test";
@@ -1746,11 +1814,19 @@ bool TestTexImport() {
   Kizuri::TextureAssetData to;
   Kizuri::TextureAssetData ta;
   Kizuri::TextureAssetData tn;
-  bool ok = Kizuri::ImportTextureFile(opaque, "", to) && Kizuri::ImportTextureFile(alpha, "", ta) && Kizuri::ImportTextureFile(normal, "", tn);
-  if (!ok) {
+  if (!Kizuri::ImportTextureFile(opaque, "", to)) {
     fs::remove_all(dir, ec);
     return false;
   }
+  if (!Kizuri::ImportTextureFile(alpha, "", ta)) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (!Kizuri::ImportTextureFile(normal, "", tn)) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  bool ok = true;
   if (to.format != Kizuri::TexFormat::Bc1 || !to.srgb || to.mips.size() < 3) {
     fs::remove_all(dir, ec);
     return false;
@@ -1798,7 +1874,7 @@ bool TestRHITextures() {
     return false;
   }
   std::vector<unsigned char> px(64 * 64 * 4, 127);
-  if (rhi->UpdateTextureMip(tex, 0, 64, 64, 256, px.data(), px.size())) {
+  if (!rhi->UpdateTextureMip(tex, 0, 64, 64, 256, px.data(), px.size())) {
     Kizuri::DestroyRHI(rhi);
     return false;
   }
@@ -2071,6 +2147,9 @@ int main() {
   failures += Check("SceneMeshGuid", TestSceneMeshGuid());
   failures += Check("TexCodec", TestTexCodec());
   failures += Check("TexImport", TestTexImport());
+  failures += Check("TexImportOpaque", TestTexImportOpaque());
+  failures += Check("TexImportAlpha", TestTexImportAlpha());
+  failures += Check("TexImportNormal", TestTexImportNormal());
   failures += Check("RHITextures", TestRHITextures());
   failures += Check("TexStreaming", TestTexStreaming());
   failures += Check("GltfTextured", TestGltfTextured());
