@@ -4,6 +4,7 @@
 #include "Kizuri/Log.h"
 #include "Kizuri/EditQueue.h"
 #include "Kizuri/Undo.h"
+#include "Kizuri/Autosave.h"
 #include "Kizuri/Window.h"
 #include "Kizuri/RHI.h"
 #include "Kizuri/Camera.h"
@@ -67,6 +68,11 @@ struct EditorApp {
   bool afterSaveRunPending;
   bool savePromptQueued;
   std::string saveDialogPrefill;
+  AutosaveManager autosave;
+  std::string tmpAutosaveDir;
+  std::string sessionFilePath;
+  std::string pendingRestoreMain;
+  bool restorePromptQueued;
   EditorApp();
   bool Initialize();
   int Run();
@@ -91,6 +97,12 @@ struct EditorApp {
   void DoNewScene();
   void DrawSavePrompt();
   void ProcessQueuedDialogs();
+  void InitStoragePaths();
+  std::string ReadLastScene();
+  void WriteLastScene(const std::string& path);
+  void OfferRestoreFor(const std::string& mainPath);
+  void DrawRestorePrompt();
+  std::string CurrentRecoveryPath();
   void DoUndo();
   void DoRedo();
   void SyncSelection();

@@ -249,4 +249,7 @@ bool Scene::IsDirty() const {
 void Scene::ClearDirty() {
   dirty = false;
 }
+void Scene::MarkDirty() {
+  dirty = true;
+}
 }

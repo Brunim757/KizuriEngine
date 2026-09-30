@@ -11,6 +11,7 @@
 #include <ImGuizmo.h>
 #include <DirectXMath.h>
 #include <cstdio>
+#include <filesystem>
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 namespace Kizuri {
 EditorApp::EditorApp()
@@ -46,7 +47,8 @@ EditorApp::EditorApp()
   , openDialogQueued(false)
   , saveDialogQueued(false)
   , afterSaveRunPending(false)
-  , savePromptQueued(false) {
+  , savePromptQueued(false)
+  , restorePromptQueued(false) {
   renameBuf[0] = '\0';
   MakeIdentityTransform(gizmoStart);
   gizmoTarget = EntityId::Invalid();
@@ -139,10 +141,15 @@ bool EditorApp::Initialize() {
   lastMouseY = my;
   log.Add(LogLevel::Success, "Kizuri Editor ready");
   gizmoOp = static_cast<int>(ImGuizmo::TRANSLATE);
+  InitStoragePaths();
+  OfferRestoreFor(ReadLastScene());
   running = true;
   return true;
 }
 void EditorApp::Shutdown() {
+  if (!scene.IsDirty()) {
+    DeleteRecoveryFile(CurrentRecoveryPath());
+  }
   if (rhi != nullptr) {
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
@@ -165,6 +172,9 @@ int EditorApp::Run() {
       dt = 0.1f;
     }
     edits.ApplyAll(scene, undo);
+    if (autosave.Update(dt, scene, CurrentRecoveryPath())) {
+      log.Add(LogLevel::Info, "Autosaved");
+    }
     RawInputPoll::Poll();
     frameDt = dt;
     ImGui_ImplDX11_NewFrame();
@@ -306,6 +316,10 @@ void EditorApp::Frame() {
     savePromptQueued = false;
     ImGui::OpenPopup("Unsaved Changes");
   }
+  if (restorePromptQueued) {
+    restorePromptQueued = false;
+    ImGui::OpenPopup("Restore Recovery");
+  }
   ImGuiIO& keysIo = ImGui::GetIO();
   if (!keysIo.WantTextInput && keysIo.KeyCtrl) {
     if (keysIo.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
@@ -337,6 +351,7 @@ void EditorApp::Frame() {
   }
   RefreshTitle();
   DrawSavePrompt();
+  DrawRestorePrompt();
 }
 void EditorApp::DrawMenuBar() {
   if (ImGui::BeginMainMenuBar()) {
@@ -360,6 +375,22 @@ void EditorApp::DrawMenuBar() {
         saveDialogPrefill = currentPath;
         saveDialogQueued = true;
         afterSaveRunPending = false;
+      }
+      if (ImGui::BeginMenu("Autosave")) {
+        double iv = autosave.Interval();
+        if (ImGui::MenuItem("Off", nullptr, iv <= 0.0)) {
+          autosave.SetInterval(0.0);
+        }
+        if (ImGui::MenuItem("Every 1 min", nullptr, iv == 60.0)) {
+          autosave.SetInterval(60.0);
+        }
+        if (ImGui::MenuItem("Every 5 min", nullptr, iv == 300.0)) {
+          autosave.SetInterval(300.0);
+        }
+        if (ImGui::MenuItem("Every 10 min", nullptr, iv == 600.0)) {
+          autosave.SetInterval(600.0);
+        }
+        ImGui::EndMenu();
       }
       if (ImGui::MenuItem("Exit")) {
         RequestAction(3);
@@ -464,18 +495,129 @@ void EditorApp::ProcessQueuedDialogs() {
     }
   }
 }
+void EditorApp::InitStoragePaths() {
+  wchar_t tmp[1024];
+  DWORD n = GetTempPathW(1024, tmp);
+  std::string tmpDir = ".";
+  if (n > 0 && n < 1024) {
+    char narrow[1024];
+    int m = WideCharToMultiByte(CP_UTF8, 0, tmp, -1, narrow, 1024, nullptr, nullptr);
+    if (m > 1) {
+      tmpDir = narrow;
+    }
+  }
+  std::filesystem::path p(tmpDir);
+  p /= "Kizuri";
+  tmpAutosaveDir = p.string();
+  std::error_code ec;
+  std::filesystem::create_directories(tmpAutosaveDir, ec);
+  wchar_t base[1024];
+  DWORD b = ExpandEnvironmentStringsW(L"%LOCALAPPDATA%\\Kizuri", base, 1024);
+  std::string appDir = tmpAutosaveDir;
+  if (b > 0 && b < 1024) {
+    char narrow[1024];
+    int m = WideCharToMultiByte(CP_UTF8, 0, base, -1, narrow, 1024, nullptr, nullptr);
+    if (m > 1) {
+      appDir = narrow;
+    }
+  }
+  std::filesystem::create_directories(appDir, ec);
+  std::filesystem::path sp(appDir);
+  sp /= "lastscene.txt";
+  sessionFilePath = sp.string();
+}
+std::string EditorApp::ReadLastScene() {
+  if (sessionFilePath.empty()) {
+    return "";
+  }
+  FILE* fp = std::fopen(sessionFilePath.c_str(), "rb");
+  if (fp == nullptr) {
+    return "";
+  }
+  char buf[1024];
+  size_t n = std::fread(buf, 1, sizeof(buf) - 1, fp);
+  std::fclose(fp);
+  buf[n] = '\0';
+  std::string out(buf);
+  while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) {
+    out.pop_back();
+  }
+  return out;
+}
+void EditorApp::WriteLastScene(const std::string& path) {
+  if (sessionFilePath.empty()) {
+    return;
+  }
+  FILE* fp = std::fopen(sessionFilePath.c_str(), "wb");
+  if (fp == nullptr) {
+    return;
+  }
+  std::fwrite(path.c_str(), 1, path.size(), fp);
+  std::fclose(fp);
+}
+std::string EditorApp::CurrentRecoveryPath() {
+  return RecoveryPathFor(currentPath, tmpAutosaveDir);
+}
+void EditorApp::OfferRestoreFor(const std::string& mainPath) {
+  std::string rec = RecoveryPathFor(mainPath, tmpAutosaveDir);
+  if (ShouldOfferRecovery(mainPath, rec)) {
+    pendingRestoreMain = mainPath;
+    restorePromptQueued = true;
+  }
+}
+void EditorApp::DrawRestorePrompt() {
+  if (ImGui::BeginPopupModal("Restore Recovery", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    std::string name = pendingRestoreMain.empty() ? "Untitled" : pendingRestoreMain;
+    size_t slash = name.find_last_of("/\\");
+    if (slash != std::string::npos) {
+      name = name.substr(slash + 1);
+    }
+    ImGui::Text("Found a newer autosave for %s.", name.c_str());
+    ImGui::Text("Restore it?");
+    if (ImGui::Button("Restore")) {
+      std::string rec = RecoveryPathFor(pendingRestoreMain, tmpAutosaveDir);
+      if (LoadSceneFromFile(scene, rec, &log)) {
+        currentPath = pendingRestoreMain;
+        scene.MarkDirty();
+        selection.Clear();
+        edits.Clear();
+        undo.Clear();
+        autosave.ResetTimer();
+        WriteLastScene(currentPath);
+        log.Add(LogLevel::Success, "Recovery restored");
+      } else {
+        log.Add(LogLevel::Error, "Recovery restore failed");
+      }
+      DeleteRecoveryFile(rec);
+      pendingRestoreMain.clear();
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Discard")) {
+      DeleteRecoveryFile(RecoveryPathFor(pendingRestoreMain, tmpAutosaveDir));
+      pendingRestoreMain.clear();
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+}
 void EditorApp::DoNewScene() {
   scene.Clear();
   selection.Clear();
   edits.Clear();
   undo.Clear();
   currentPath.clear();
+  autosave.ResetTimer();
+  WriteLastScene("");
   log.Add(LogLevel::Warning, "Scene cleared");
 }
 void EditorApp::DoSaveTo(const std::string& path) {
   if (SaveSceneToFile(scene, path)) {
     currentPath = path;
     scene.ClearDirty();
+    autosave.ResetTimer();
+    DeleteRecoveryFile(RecoveryPathFor(path, tmpAutosaveDir));
+    WriteLastScene(path);
     log.Add(LogLevel::Success, std::string("Scene saved: ") + path);
   } else {
     log.Add(LogLevel::Error, std::string("Scene save failed: ") + path);
@@ -487,7 +629,10 @@ void EditorApp::DoOpenPath(const std::string& path) {
     selection.Clear();
     edits.Clear();
     undo.Clear();
+    autosave.ResetTimer();
+    WriteLastScene(path);
     log.Add(LogLevel::Success, std::string("Scene opened: ") + path);
+    OfferRestoreFor(path);
   }
 }
 void EditorApp::DrawSavePrompt() {

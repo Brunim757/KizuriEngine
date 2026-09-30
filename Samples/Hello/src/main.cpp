@@ -20,7 +20,9 @@
 #include "Kizuri/Reflection.h"
 #include "Kizuri/SceneSerializer.h"
 #include "Kizuri/Undo.h"
+#include "Kizuri/Autosave.h"
 #include <DirectXMath.h>
+#include <filesystem>
 #include <TaskScheduler.h>
 #include <cstdio>
 #include <cstring>
@@ -1098,6 +1100,122 @@ bool TestUndoMultiPartial() {
   }
   return true;
 }
+bool TestAutosavePaths() {
+  std::string rec = Kizuri::RecoveryPathFor("C:/proj/scene.kzscene", "T");
+  if (rec != "C:/proj/scene.kzscene.autosave.kzscene") {
+    return false;
+  }
+  std::string u = Kizuri::RecoveryPathFor("", "T");
+  std::filesystem::path p(u);
+  if (p.filename().string() != "KizuriUntitled.autosave.kzscene") {
+    return false;
+  }
+  if (p.parent_path().string() != "T") {
+    return false;
+  }
+  return true;
+}
+bool TestAutosaveUpdate() {
+  std::filesystem::path dir = std::filesystem::temp_directory_path() / "kzautosave_test";
+  std::error_code ec;
+  std::filesystem::create_directories(dir, ec);
+  std::string rec = (dir / "r.kzscene").string();
+  std::filesystem::remove(rec, ec);
+  Kizuri::Scene scene;
+  scene.CreateEntity("Auto");
+  Kizuri::AutosaveManager m;
+  if (m.Interval() != 60.0) {
+    return false;
+  }
+  m.SetInterval(0.05);
+  if (!m.Update(0.06, scene, rec)) {
+    return false;
+  }
+  Kizuri::Scene back;
+  if (!Kizuri::LoadSceneFromFile(back, rec, nullptr) || back.Count() != 1) {
+    std::filesystem::remove(rec, ec);
+    return false;
+  }
+  scene.ClearDirty();
+  std::filesystem::remove(rec, ec);
+  if (m.Update(5.0, scene, rec)) {
+    return false;
+  }
+  if (std::filesystem::exists(rec, ec)) {
+    std::filesystem::remove(rec, ec);
+    return false;
+  }
+  m.SetInterval(0.0);
+  scene.CreateEntity("Dirty2");
+  if (m.Update(5.0, scene, rec)) {
+    return false;
+  }
+  if (std::filesystem::exists(rec, ec)) {
+    std::filesystem::remove(rec, ec);
+    return false;
+  }
+  std::filesystem::remove_all(dir, ec);
+  return true;
+}
+bool TestAutosaveOffer() {
+  std::filesystem::path dir = std::filesystem::temp_directory_path() / "kzoffer_test";
+  std::error_code ec;
+  std::filesystem::create_directories(dir, ec);
+  std::string main = (dir / "m.kzscene").string();
+  std::string rec = (dir / "r.kzscene").string();
+  {
+    FILE* fp = std::fopen(main.c_str(), "wb");
+    std::fputs("x", fp);
+    std::fclose(fp);
+    fp = std::fopen(rec.c_str(), "wb");
+    std::fputs("y", fp);
+    std::fclose(fp);
+  }
+  auto now = std::filesystem::file_time_type::clock::now();
+  std::filesystem::last_write_time(main, now - std::chrono::seconds(10), ec);
+  std::filesystem::last_write_time(rec, now, ec);
+  if (!Kizuri::ShouldOfferRecovery(main, rec)) {
+    std::filesystem::remove_all(dir, ec);
+    return false;
+  }
+  std::filesystem::last_write_time(main, now, ec);
+  std::filesystem::last_write_time(rec, now - std::chrono::seconds(10), ec);
+  if (Kizuri::ShouldOfferRecovery(main, rec)) {
+    std::filesystem::remove_all(dir, ec);
+    return false;
+  }
+  if (Kizuri::ShouldOfferRecovery(main, (dir / "missing.kzscene").string())) {
+    std::filesystem::remove_all(dir, ec);
+    return false;
+  }
+  std::filesystem::remove(main, ec);
+  if (!Kizuri::ShouldOfferRecovery(main, rec)) {
+    std::filesystem::remove_all(dir, ec);
+    return false;
+  }
+  if (!Kizuri::DeleteRecoveryFile(rec)) {
+    std::filesystem::remove_all(dir, ec);
+    return false;
+  }
+  if (Kizuri::DeleteRecoveryFile(rec)) {
+    std::filesystem::remove_all(dir, ec);
+    return false;
+  }
+  Kizuri::Scene s;
+  s.CreateEntity("M");
+  s.ClearDirty();
+  if (s.IsDirty()) {
+    std::filesystem::remove_all(dir, ec);
+    return false;
+  }
+  s.MarkDirty();
+  if (!s.IsDirty()) {
+    std::filesystem::remove_all(dir, ec);
+    return false;
+  }
+  std::filesystem::remove_all(dir, ec);
+  return true;
+}
 }
 int main() {
   std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -1145,6 +1263,9 @@ int main() {
   failures += Check("Undo-Stack", TestUndoStack());
   failures += Check("Undo-MultiMove", TestUndoMultiMove());
   failures += Check("Undo-MultiPartial", TestUndoMultiPartial());
+  failures += Check("Autosave-Paths", TestAutosavePaths());
+  failures += Check("Autosave-Update", TestAutosaveUpdate());
+  failures += Check("Autosave-Offer", TestAutosaveOffer());
   if (failures == 0) {
     std::printf("KizuriHello: all bootstrap libs linked and functional\n");
   } else {

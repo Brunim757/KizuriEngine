@@ -43,6 +43,7 @@ public:
   void Clear();
   bool IsDirty() const;
   void ClearDirty();
+  void MarkDirty();
 private:
   struct Slot {
     Entity entity;
