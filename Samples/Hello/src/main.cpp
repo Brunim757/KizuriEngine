@@ -1361,7 +1361,7 @@ bool TestMeshCodec() {
     return false;
   }
   Kizuri::MeshAssetData fromFile;
-  bool ok = Kizuri::DecodeMeshFile(fromFile, path) && fromFile.guid == data.guid && fromFile.indices == data.indices;
+  bool ok = Kizuri::DecodeMeshFile(path, fromFile) && fromFile.guid == data.guid && fromFile.indices == data.indices;
   std::remove(path);
   if (!ok) {
     return false;
