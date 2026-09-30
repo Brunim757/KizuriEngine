@@ -1,0 +1,40 @@
+namespace KizuriAssets;
+struct Vec3 {
+  x:float;
+  y:float;
+  z:float;
+}
+struct AABB {
+  min:Vec3;
+  max:Vec3;
+}
+table MaterialSlot {
+  name:string;
+  albedoR:float;
+  albedoG:float;
+  albedoB:float;
+  metallic:float;
+  roughness:float;
+  albedoTexGuid:string;
+}
+table MeshPart {
+  indexOffset:uint;
+  indexCount:uint;
+  material:uint;
+}
+table MeshAsset {
+  guid:string;
+  vertexData:[ubyte];
+  vertexCount:uint;
+  vertexStride:uint;
+  indexData:[ubyte];
+  indexCount:uint;
+  bounds:AABB;
+  materials:[MaterialSlot];
+  parts:[MeshPart];
+  hasSource:bool;
+  sourcePath:string;
+  sourceHash:ulong;
+  sourceTimestamp:long;
+}
+root_type MeshAsset;

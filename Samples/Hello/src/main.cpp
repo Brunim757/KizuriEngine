@@ -22,6 +22,10 @@
 #include "Kizuri/Undo.h"
 #include "Kizuri/Autosave.h"
 #include "Kizuri/Notifications.h"
+#include "Kizuri/Assets/Guid.h"
+#include "Kizuri/Assets/MeshCodec.h"
+#include "Kizuri/Assets/MeshImporter.h"
+#include "Kizuri/Assets/AssetDatabase.h"
 #include <DirectXMath.h>
 #include <filesystem>
 #include <TaskScheduler.h>
@@ -1252,6 +1256,393 @@ bool TestNotifications() {
   n.Clear();
   return n.ActiveCount() == 0 && n.HistoryCount() == 0;
 }
+bool TestGuid() {
+  std::string a = Kizuri::GenerateGuidString();
+  std::string b = Kizuri::GenerateGuidString();
+  if (a.size() != 36 || b.size() != 36 || a == b) {
+    return false;
+  }
+  if (a[8] != '-' || a[13] != '-' || a[18] != '-' || a[23] != '-') {
+    return false;
+  }
+  if (Kizuri::Fnv1a64(nullptr, 0) != 14695981039346656037ULL) {
+    return false;
+  }
+  if (Kizuri::Fnv1a64("", 0) != 14695981039346656037ULL) {
+    return false;
+  }
+  const char* hello = "hello";
+  if (Kizuri::Fnv1a64(hello, 5) == Kizuri::Fnv1a64(hello, 4)) {
+    return false;
+  }
+  uint64_t h1 = 0;
+  uint64_t h2 = 0;
+  if (!Kizuri::Fnv1a64File("Samples/Assets/cube.gltf", h1)) {
+    return false;
+  }
+  if (!Kizuri::Fnv1a64File("Samples/Assets/cube.gltf", h2) || h1 != h2 || h1 == 0) {
+    return false;
+  }
+  if (Kizuri::Fnv1a64File("no_such_file_xyz.bin", h2)) {
+    return false;
+  }
+  return true;
+}
+bool TestMeshCodec() {
+  Kizuri::MeshAssetData data;
+  data.guid = "01234567-89ab-cdef-0123-456789abcdef";
+  data.positions = { -0.5f, -0.5f, 0.0f, 0.5f, -0.5f, 0.0f, 0.0f, 0.5f, 0.0f };
+  data.normals = { 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f };
+  data.uvs = { 0.0f, 0.0f, 1.0f, 0.0f, 0.5f, 1.0f };
+  data.indices = { 0, 1, 2 };
+  Kizuri::MeshMaterialData mat;
+  mat.name = "Mat1";
+  mat.albedo[0] = 0.2f;
+  mat.albedo[1] = 0.4f;
+  mat.albedo[2] = 0.6f;
+  mat.metallic = 0.1f;
+  mat.roughness = 0.9f;
+  data.materials.push_back(mat);
+  Kizuri::MeshPartData part;
+  part.indexOffset = 0;
+  part.indexCount = 3;
+  part.material = 0;
+  data.parts.push_back(part);
+  data.aabbMin[0] = -0.5f;
+  data.aabbMin[1] = -0.5f;
+  data.aabbMin[2] = 0.0f;
+  data.aabbMax[0] = 0.5f;
+  data.aabbMax[1] = 0.5f;
+  data.aabbMax[2] = 0.0f;
+  data.hasSource = true;
+  data.sourcePath = "C:/proj/tri.glb";
+  data.sourceHash = 123456789ULL;
+  data.sourceTimestamp = 987654321LL;
+  std::vector<unsigned char> bytes;
+  if (!Kizuri::EncodeMeshMemory(data, bytes) || bytes.size() < 16) {
+    return false;
+  }
+  Kizuri::MeshAssetData back;
+  if (!Kizuri::DecodeMeshMemory(bytes.data(), bytes.size(), back)) {
+    return false;
+  }
+  if (back.guid != data.guid || back.positions != data.positions || back.normals != data.normals || back.uvs != data.uvs || back.indices != data.indices) {
+    return false;
+  }
+  if (back.materials.size() != 1 || back.materials[0].name != "Mat1" || back.materials[0].albedo[2] != 0.6f) {
+    return false;
+  }
+  if (back.parts.size() != 1 || back.parts[0].indexCount != 3) {
+    return false;
+  }
+  if (back.aabbMin[0] != -0.5f || back.aabbMax[1] != 0.5f) {
+    return false;
+  }
+  if (!back.hasSource || back.sourcePath != data.sourcePath || back.sourceHash != data.sourceHash || back.sourceTimestamp != data.sourceTimestamp) {
+    return false;
+  }
+  std::vector<unsigned char> bad = bytes;
+  bad[0] = 'X';
+  Kizuri::MeshAssetData tmp;
+  if (Kizuri::DecodeMeshMemory(bad.data(), bad.size(), tmp)) {
+    return false;
+  }
+  bad = bytes;
+  bad[4] = 0xFF;
+  if (Kizuri::DecodeMeshMemory(bad.data(), bad.size(), tmp)) {
+    return false;
+  }
+  if (Kizuri::DecodeMeshMemory(bytes.data(), 10, tmp)) {
+    return false;
+  }
+  const char* path = "test_mesh_tmp.kzmesh";
+  std::remove(path);
+  if (!Kizuri::EncodeMeshFile(data, path)) {
+    return false;
+  }
+  Kizuri::MeshAssetData fromFile;
+  bool ok = Kizuri::DecodeMeshFile(fromFile, path) && fromFile.guid == data.guid && fromFile.indices == data.indices;
+  std::remove(path);
+  if (!ok) {
+    return false;
+  }
+  if (Kizuri::DecodeMeshFile("no_such_file_xyz.kzmesh", tmp)) {
+    return false;
+  }
+  return true;
+}
+bool TestMeshImport() {
+  Kizuri::MeshAssetData data;
+  if (!Kizuri::ImportGltfMesh("Samples/Assets/cube.gltf", "", data, nullptr)) {
+    return false;
+  }
+  if (data.positions.size() / 3 != 24 || data.indices.size() != 36 || data.parts.empty()) {
+    return false;
+  }
+  if (!data.hasSource || data.sourcePath != "Samples/Assets/cube.gltf" || data.sourceHash == 0) {
+    return false;
+  }
+  if (data.aabbMin[0] != -0.5f || data.aabbMax[0] != 0.5f) {
+    return false;
+  }
+  if (data.guid.empty()) {
+    return false;
+  }
+  Kizuri::MeshAssetData keep;
+  if (!Kizuri::ImportGltfMesh("Samples/Assets/cube.gltf", "fixed-guid-1234", keep, nullptr) || keep.guid != "fixed-guid-1234") {
+    return false;
+  }
+  if (Kizuri::ImportGltfMesh("no_such_file_xyz.glb", "", data, nullptr)) {
+    return false;
+  }
+  return true;
+}
+bool TestAssetDatabase() {
+  namespace fs = std::filesystem;
+  fs::path dir = fs::temp_directory_path() / "kzdb_test";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  fs::copy_file("Samples/Assets/cube.gltf", dir / "cube.gltf", ec);
+  if (ec) {
+    return false;
+  }
+  Kizuri::AssetDatabase db;
+  db.SetAssetsDir(dir.string());
+  db.Scan();
+  db.DrainBlocking();
+  if (db.PendingImports() != 0) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  std::vector<std::string> guids = db.AllGuids();
+  if (guids.size() != 1) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  std::string guid = guids[0];
+  const Kizuri::MeshRecord* rec = db.GetByGuid(guid);
+  if (rec == nullptr || !rec->loaded || !rec->hasSource) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (rec->state != Kizuri::MeshAssetState::Ready || rec->data.positions.size() / 3 != 24) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (!fs::exists(rec->meshPath, ec)) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  db.Scan();
+  db.DrainBlocking();
+  if (db.PendingImports() != 0 || db.AllGuids().size() != 1 || db.AllGuids()[0] != guid) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (!db.RenameAssetFile(guid, "renamed_cube.kzmesh")) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  rec = db.GetByGuid(guid);
+  if (rec == nullptr || rec->meshPath.find("renamed_cube.kzmesh") == std::string::npos) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  {
+    FILE* fp = std::fopen((dir / "cube.gltf").string().c_str(), "ab");
+    std::fputs(" ", fp);
+    std::fclose(fp);
+  }
+  db.Scan();
+  db.DrainBlocking();
+  rec = db.GetByGuid(guid);
+  if (rec == nullptr || rec->state != Kizuri::MeshAssetState::Outdated) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (!db.Reimport(guid)) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  db.DrainBlocking();
+  rec = db.GetByGuid(guid);
+  if (rec == nullptr || rec->state != Kizuri::MeshAssetState::Ready || rec->data.positions.size() / 3 != 24) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (db.AllGuids()[0] != guid) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  fs::create_directories(dir / "Sub", ec);
+  fs::copy_file(dir / "cube.gltf", dir / "Sub" / "moved_cube.glb", ec);
+  if (ec) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  fs::copy_file(dir / "cube.gltf", fs::temp_directory_path() / "kzdb_backup.glb", ec);
+  if (ec) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  fs::remove(dir / "cube.gltf", ec);
+  db.Scan();
+  db.DrainBlocking();
+  rec = db.GetByGuid(guid);
+  if (rec == nullptr || rec->state != Kizuri::MeshAssetState::Ready) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (rec->sourcePath.find("moved_cube.glb") == std::string::npos) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (db.TakeRelocated().empty()) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  fs::remove(dir / "Sub" / "moved_cube.glb", ec);
+  db.Scan();
+  db.DrainBlocking();
+  rec = db.GetByGuid(guid);
+  if (rec == nullptr || rec->state != Kizuri::MeshAssetState::SourceMissing || !rec->loaded) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  fs::copy_file(fs::temp_directory_path() / "kzdb_backup.glb", dir / "Sub" / "moved_cube.glb", ec);
+  if (ec) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  fs::remove(fs::temp_directory_path() / "kzdb_backup.glb", ec);
+  if (db.RelocateMissing() != 1) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  rec = db.GetByGuid(guid);
+  if (rec == nullptr || rec->state != Kizuri::MeshAssetState::Ready) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (db.TakeRelocated().empty()) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  fs::remove(fs::temp_directory_path() / "kzdb_backup.glb", ec);
+  if (db.Reimport("no-such-guid")) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  std::vector<Kizuri::RefUse> refs;
+  refs.push_back({ "Hero", guid });
+  refs.push_back({ "Sword", guid });
+  refs.push_back({ "Tree", "other-guid" });
+  std::map<std::string, size_t> counts = db.ComputeRefCounts(refs);
+  if (counts[guid] != 2) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  std::vector<std::string> blocked;
+  if (db.DeleteAssetFile(guid, false, refs, blocked)) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (blocked.size() != 2 || blocked[0] != "Hero" || blocked[1] != "Sword") {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (db.GetByGuid(guid) == nullptr) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  std::vector<std::string> blocked2;
+  if (!db.DeleteAssetFile(guid, true, refs, blocked2) || db.GetByGuid(guid) != nullptr) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  Kizuri::MeshAssetData orphan;
+  orphan.guid = Kizuri::GenerateGuidString();
+  orphan.positions = { 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
+  orphan.normals = { 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f };
+  orphan.uvs = { 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f };
+  orphan.indices = { 0, 1, 2 };
+  Kizuri::MeshPartData opart;
+  opart.indexOffset = 0;
+  opart.indexCount = 3;
+  opart.material = 0;
+  orphan.parts.push_back(opart);
+  orphan.aabbMin[0] = 0.0f;
+  orphan.aabbMin[1] = 0.0f;
+  orphan.aabbMin[2] = 0.0f;
+  orphan.aabbMax[0] = 1.0f;
+  orphan.aabbMax[1] = 1.0f;
+  orphan.aabbMax[2] = 0.0f;
+  orphan.hasSource = false;
+  if (!Kizuri::EncodeMeshFile(orphan, (dir / "orphan.kzmesh").string())) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  db.Scan();
+  db.DrainBlocking();
+  const Kizuri::MeshRecord* orec = db.GetByGuid(orphan.guid);
+  if (orec == nullptr || orec->state != Kizuri::MeshAssetState::NoSource || !orec->loaded) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (orec->data.positions.size() != 9) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (db.Reimport(orphan.guid)) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (!db.RenameAssetFile(orphan.guid, "renamed_orphan.kzmesh")) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  orec = db.GetByGuid(orphan.guid);
+  if (orec == nullptr || orec->meshPath.find("renamed_orphan.kzmesh") == std::string::npos) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  fs::remove_all(dir, ec);
+  return true;
+}
+bool TestSceneMeshGuid() {
+  Kizuri::Scene scene;
+  Kizuri::EntityId a = scene.CreateEntity("WithMesh");
+  Kizuri::Entity* e = scene.Get(a);
+  e->meshGuid = "guid-abc-123";
+  scene.CreateEntity("NoMesh");
+  const char* path = "test_meshguid_tmp.kzscene";
+  std::remove(path);
+  if (!Kizuri::SaveSceneToFile(scene, path)) {
+    return false;
+  }
+  Kizuri::Scene back;
+  if (!Kizuri::LoadSceneFromFile(back, path, nullptr)) {
+    std::remove(path);
+    return false;
+  }
+  std::remove(path);
+  const Kizuri::Entity* ra = nullptr;
+  const Kizuri::Entity* rn = nullptr;
+  std::vector<Kizuri::EntityId> all = back.All();
+  for (size_t i = 0; i < all.size(); ++i) {
+    const Kizuri::Entity* ce = back.Get(all[i]);
+    if (ce->name == "WithMesh") {
+      ra = ce;
+    } else {
+      rn = ce;
+    }
+  }
+  if (ra == nullptr || rn == nullptr) {
+    return false;
+  }
+  return ra->meshGuid == "guid-abc-123" && rn->meshGuid.empty();
+}
 }
 int main() {
   std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -1303,6 +1694,11 @@ int main() {
   failures += Check("Autosave-Update", TestAutosaveUpdate());
   failures += Check("Autosave-Offer", TestAutosaveOffer());
   failures += Check("Notifications", TestNotifications());
+  failures += Check("Guid", TestGuid());
+  failures += Check("MeshCodec", TestMeshCodec());
+  failures += Check("MeshImport", TestMeshImport());
+  failures += Check("AssetDatabase", TestAssetDatabase());
+  failures += Check("SceneMeshGuid", TestSceneMeshGuid());
   if (failures == 0) {
     std::printf("KizuriHello: all bootstrap libs linked and functional\n");
   } else {

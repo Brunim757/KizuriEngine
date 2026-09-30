@@ -1,0 +1,8 @@
+set(KZ_FBS ${CMAKE_CURRENT_SOURCE_DIR}/schema/kzassets.fbs)
+set(KZ_FBS_GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
+set(KZ_FBS_OUT ${KZ_FBS_GEN_DIR}/kzassets_generated.h)
+file(MAKE_DIRECTORY ${KZ_FBS_GEN_DIR})
+add_custom_command(OUTPUT ${KZ_FBS_OUT} COMMAND $<TARGET_FILE:flatc> --cpp --scoped-enums -o ${KZ_FBS_GEN_DIR} ${KZ_FBS} DEPENDS ${KZ_FBS} flatc)
+add_library(KizuriAssets STATIC src/Guid.cpp src/MeshCodec.cpp src/MeshImporter.cpp src/AssetDatabase.cpp ${KZ_FBS_OUT})
+target_include_directories(KizuriAssets PUBLIC include ${KZ_FBS_GEN_DIR})
+target_link_libraries(KizuriAssets PUBLIC flatbuffers libzstd_static KizuriCore KizuriScene kizuri_cgltf)

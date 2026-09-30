@@ -23,6 +23,7 @@ struct Entity {
   EntityId id;
   std::string name;
   Transform transform;
+  std::string meshGuid;
   EntityId parent;
   std::vector<EntityId> children;
 };

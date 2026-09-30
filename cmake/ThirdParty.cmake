@@ -8,7 +8,7 @@ set(ZSTD_BUILD_CONTRIB OFF CACHE BOOL "" FORCE)
 set(ZSTD_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(ZSTD_BUILD_STATIC ON CACHE BOOL "" FORCE)
 set(FLATBUFFERS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(FLATBUFFERS_BUILD_FLATC OFF CACHE BOOL "" FORCE)
+set(FLATBUFFERS_BUILD_FLATC ON CACHE BOOL "" FORCE)
 set(FLATBUFFERS_BUILD_FLATHASH OFF CACHE BOOL "" FORCE)
 set(FLATBUFFERS_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
@@ -37,6 +37,22 @@ FetchContent_Declare(
   GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(DirectXMath enkiTS zstd flatbuffers)
+set(KIZURI_PACKAGES_DIR ${CMAKE_BINARY_DIR}/kizuri-packages)
+file(MAKE_DIRECTORY ${KIZURI_PACKAGES_DIR})
+file(WRITE ${KIZURI_PACKAGES_DIR}/directxmath-config.cmake "add_library(Microsoft::DirectXMath INTERFACE IMPORTED)\nset_target_properties(Microsoft::DirectXMath PROPERTIES INTERFACE_INCLUDE_DIRECTORIES \"${directxmath_SOURCE_DIR}/Inc\")\n")
+set(directxmath_DIR ${KIZURI_PACKAGES_DIR} CACHE PATH "" FORCE)
+set(BUILD_DX11 OFF CACHE BOOL "" FORCE)
+set(BUILD_DX12 OFF CACHE BOOL "" FORCE)
+set(BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(BUILD_SAMPLE OFF CACHE BOOL "" FORCE)
+set(BC_USE_OPENMP OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+  DirectXTex
+  GIT_REPOSITORY https://github.com/microsoft/DirectXTex.git
+  GIT_TAG may2026
+  GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(DirectXTex)
 FetchContent_Declare(
   imgui
   GIT_REPOSITORY https://github.com/ocornut/imgui.git
