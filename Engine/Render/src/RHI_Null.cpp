@@ -2,6 +2,7 @@
 #include <unordered_map>
 #include <vector>
 #include <cstring>
+#include <set>
 namespace Kizuri {
 class NullRHI : public IRHI {
 public:
@@ -283,6 +284,40 @@ public:
     (void)sampler;
     Note(false);
   }
+  RHITexture CreateTexture2D(int tw, int th, int mipLevels, RHITextureFormat fmt) override {
+    if (tw <= 0 || th <= 0 || mipLevels <= 0 || mipLevels > 16) {
+      return 0;
+    }
+    uint64_t id = nextId++;
+    NullTexture t;
+    t.w = tw;
+    t.h = th;
+    t.mips = mipLevels;
+    t.fmt = fmt;
+    textures[id] = t;
+    return id;
+  }
+  bool UpdateTextureMip(RHITexture tex, int mip, int mw, int mh, uint32_t rowPitch, const void* data, size_t bytes) override {
+    auto it = textures.find(tex);
+    if (it == textures.end() || data == nullptr) {
+      return false;
+    }
+    if (!CheckMip(it->second, mip, mw, mh, rowPitch, bytes)) {
+      return false;
+    }
+    it->second.resident.insert(mip);
+    return true;
+  }
+  void DestroyTexture(RHITexture tex) override {
+    textures.erase(tex);
+  }
+  int TextureResidentMips(RHITexture tex) const override {
+    auto it = textures.find(tex);
+    if (it == textures.end()) {
+      return 0;
+    }
+    return static_cast<int>(it->second.resident.size());
+  }
   void DrawIndexed(uint32_t indexCount, uint32_t startIndex, int32_t baseVertex) override {
     (void)indexCount;
     (void)startIndex;
@@ -306,6 +341,49 @@ private:
   std::unordered_map<uint64_t, std::vector<unsigned char>> cbuffers;
   std::unordered_map<uint64_t, int> targets;
   std::unordered_map<uint64_t, int> shaders;
+  struct NullTexture {
+    int w;
+    int h;
+    int mips;
+    RHITextureFormat fmt;
+    std::set<int> resident;
+  };
+  std::unordered_map<uint64_t, NullTexture> textures;
+  static bool CheckMip(const NullTexture& t, int mip, int mw, int mh, uint32_t rowPitch, size_t bytes) {
+    if (mip < 0 || mip >= t.mips) {
+      return false;
+    }
+    int ew = t.w >> mip;
+    int eh = t.h >> mip;
+    if (ew < 1) {
+      ew = 1;
+    }
+    if (eh < 1) {
+      eh = 1;
+    }
+    if (mw != ew || mh != eh) {
+      return false;
+    }
+    size_t expect = 0;
+    if (t.fmt == RHITextureFormat::RGBA8_UNORM || t.fmt == RHITextureFormat::RGBA8_UNORM_SRGB) {
+      if (rowPitch != static_cast<uint32_t>(mw * 4)) {
+        return false;
+      }
+      expect = static_cast<size_t>(rowPitch) * static_cast<size_t>(mh);
+    } else {
+      size_t blockBytes = 16;
+      if (t.fmt == RHITextureFormat::BC1_UNORM || t.fmt == RHITextureFormat::BC1_UNORM_SRGB) {
+        blockBytes = 8;
+      }
+      size_t blocksX = (static_cast<size_t>(mw) + 3) / 4;
+      size_t blocksY = (static_cast<size_t>(mh) + 3) / 4;
+      if (rowPitch != blocksX * blockBytes) {
+        return false;
+      }
+      expect = rowPitch * blocksY;
+    }
+    return bytes == expect;
+  }
   RHIVertexShader curVS;
   RHIPixelShader curPS;
   RHIInputLayout curLayout;

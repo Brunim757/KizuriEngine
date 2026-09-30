@@ -26,6 +26,8 @@
 #include "Kizuri/Assets/MeshCodec.h"
 #include "Kizuri/Assets/MeshImporter.h"
 #include "Kizuri/Assets/AssetDatabase.h"
+#include "Kizuri/Assets/TexCodec.h"
+#include "Kizuri/Assets/TextureImporter.h"
 #include <DirectXMath.h>
 #include <filesystem>
 #include <TaskScheduler.h>
@@ -1643,6 +1645,374 @@ bool TestSceneMeshGuid() {
   }
   return ra->meshGuid == "guid-abc-123" && rn->meshGuid.empty();
 }
+void WriteTestBMP(const std::string& path, int w, int h, bool withAlpha) {
+  int rowBytes = w * 4;
+  int imgBytes = rowBytes * h;
+  std::vector<unsigned char> file(54 + imgBytes, 0);
+  file[0] = 'B';
+  file[1] = 'M';
+  uint32_t fs = static_cast<uint32_t>(file.size());
+  file[2] = static_cast<unsigned char>(fs & 0xFF);
+  file[3] = static_cast<unsigned char>((fs >> 8) & 0xFF);
+  file[4] = static_cast<unsigned char>((fs >> 16) & 0xFF);
+  file[5] = static_cast<unsigned char>((fs >> 24) & 0xFF);
+  file[10] = 54;
+  file[14] = 40;
+  file[18] = static_cast<unsigned char>(w & 0xFF);
+  file[19] = static_cast<unsigned char>((w >> 8) & 0xFF);
+  file[22] = static_cast<unsigned char>(h & 0xFF);
+  file[23] = static_cast<unsigned char>((h >> 8) & 0xFF);
+  file[26] = 1;
+  file[28] = 32;
+  for (int y = 0; y < h; ++y) {
+    for (int x = 0; x < w; ++x) {
+      size_t o = 54 + static_cast<size_t>(h - 1 - y) * rowBytes + x * 4;
+      file[o + 0] = static_cast<unsigned char>((x * 64) & 0xFF);
+      file[o + 1] = static_cast<unsigned char>((y * 64) & 0xFF);
+      file[o + 2] = 128;
+      file[o + 3] = (withAlpha && x == 0 && y == 0) ? 0 : 255;
+    }
+  }
+  FILE* fp = std::fopen(path.c_str(), "wb");
+  std::fwrite(file.data(), 1, file.size(), fp);
+  std::fclose(fp);
+}
+bool TestTexCodec() {
+  Kizuri::TextureAssetData data;
+  data.guid = "tex-guid-0001";
+  data.width = 4;
+  data.height = 4;
+  data.format = Kizuri::TexFormat::Rgba8;
+  data.srgb = true;
+  for (int m = 0; m < 3; ++m) {
+    int mw = 4 >> m;
+    int mh = 4 >> m;
+    Kizuri::TextureMipData mip;
+    mip.width = static_cast<uint32_t>(mw);
+    mip.height = static_cast<uint32_t>(mh);
+    mip.rowPitch = static_cast<uint32_t>(mw * 4);
+    mip.data.resize(mip.rowPitch * mh, static_cast<unsigned char>(m + 1));
+    data.mips.push_back(mip);
+  }
+  data.hasSource = true;
+  data.sourcePath = "C:/proj/a.png";
+  data.sourceHash = 777ULL;
+  data.sourceTimestamp = 888LL;
+  std::vector<unsigned char> bytes;
+  if (!Kizuri::EncodeTextureMemory(data, bytes)) {
+    return false;
+  }
+  Kizuri::TextureAssetData back;
+  if (!Kizuri::DecodeTextureMemory(bytes.data(), bytes.size(), back)) {
+    return false;
+  }
+  if (back.guid != data.guid || back.width != 4 || back.mips.size() != 3 || back.format != Kizuri::TexFormat::Rgba8 || !back.srgb) {
+    return false;
+  }
+  if (back.mips[2].data.size() != 4 || back.mips[2].data[0] != 3) {
+    return false;
+  }
+  if (back.sourceHash != 777ULL || back.sourceTimestamp != 888LL) {
+    return false;
+  }
+  std::vector<unsigned char> bad = bytes;
+  bad[0] = 'X';
+  Kizuri::TextureAssetData tmp;
+  if (Kizuri::DecodeTextureMemory(bad.data(), bad.size(), tmp)) {
+    return false;
+  }
+  const char* path = "test_tex_tmp.kztex";
+  std::remove(path);
+  if (!Kizuri::EncodeTextureFile(data, path)) {
+    return false;
+  }
+  Kizuri::TextureAssetData fromFile;
+  bool ok = Kizuri::DecodeTextureFile(path, fromFile) && fromFile.guid == data.guid;
+  std::remove(path);
+  return ok;
+}
+bool TestTexImport() {
+  namespace fs = std::filesystem;
+  fs::path dir = fs::temp_directory_path() / "kzteximport_test";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  std::string opaque = (dir / "brick.bmp").string();
+  std::string alpha = (dir / "glass.bmp").string();
+  std::string normal = (dir / "wall_normal.bmp").string();
+  WriteTestBMP(opaque, 8, 8, false);
+  WriteTestBMP(alpha, 8, 8, true);
+  WriteTestBMP(normal, 8, 8, false);
+  Kizuri::TextureAssetData to;
+  Kizuri::TextureAssetData ta;
+  Kizuri::TextureAssetData tn;
+  bool ok = Kizuri::ImportTextureFile(opaque, "", to) && Kizuri::ImportTextureFile(alpha, "", ta) && Kizuri::ImportTextureFile(normal, "", tn);
+  if (!ok) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (to.format != Kizuri::TexFormat::Bc1 || !to.srgb || to.mips.size() < 3) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (ta.format != Kizuri::TexFormat::Bc3) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (tn.format != Kizuri::TexFormat::Bc5 || tn.srgb) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (to.width != 8 || to.mips[0].width != 8 || to.mips.back().width != 1) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (Kizuri::ImportTextureFile("no_such_file_xyz.bmp", "", tn)) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  fs::remove_all(dir, ec);
+  return true;
+}
+bool TestRHITextures() {
+  Kizuri::IRHI* rhi = Kizuri::CreateRHI(Kizuri::RHI_API::Null);
+  if (rhi == nullptr) {
+    return false;
+  }
+  Kizuri::RHIDesc desc;
+  desc.windowHandle = nullptr;
+  desc.width = 64;
+  desc.height = 64;
+  desc.vsync = false;
+  if (!rhi->Initialize(desc)) {
+    Kizuri::DestroyRHI(rhi);
+    return false;
+  }
+  Kizuri::RHITexture tex = rhi->CreateTexture2D(64, 64, 7, Kizuri::RHITextureFormat::RGBA8_UNORM);
+  if (tex == 0) {
+    Kizuri::DestroyRHI(rhi);
+    return false;
+  }
+  if (rhi->CreateTexture2D(0, 64, 1, Kizuri::RHITextureFormat::RGBA8_UNORM) != 0) {
+    Kizuri::DestroyRHI(rhi);
+    return false;
+  }
+  std::vector<unsigned char> px(64 * 64 * 4, 127);
+  if (rhi->UpdateTextureMip(tex, 0, 64, 64, 256, px.data(), px.size())) {
+    Kizuri::DestroyRHI(rhi);
+    return false;
+  }
+  std::vector<unsigned char> bad(10, 0);
+  if (rhi->UpdateTextureMip(tex, 0, 64, 64, 256, bad.data(), bad.size())) {
+    Kizuri::DestroyRHI(rhi);
+    return false;
+  }
+  if (!rhi->UpdateTextureMip(tex, 0, 64, 64, 256, px.data(), px.size())) {
+    Kizuri::DestroyRHI(rhi);
+    return false;
+  }
+  if (rhi->TextureResidentMips(tex) != 1) {
+    Kizuri::DestroyRHI(rhi);
+    return false;
+  }
+  if (rhi->UpdateTextureMip(tex, 7, 1, 1, 4, px.data(), 4)) {
+    Kizuri::DestroyRHI(rhi);
+    return false;
+  }
+  Kizuri::RHITexture bc = rhi->CreateTexture2D(8, 8, 4, Kizuri::RHITextureFormat::BC1_UNORM);
+  std::vector<unsigned char> blk(32, 0);
+  if (!rhi->UpdateTextureMip(bc, 0, 8, 8, 16, blk.data(), blk.size())) {
+    Kizuri::DestroyRHI(rhi);
+    return false;
+  }
+  if (rhi->UpdateTextureMip(bc, 0, 8, 8, 8, blk.data(), 16)) {
+    Kizuri::DestroyRHI(rhi);
+    return false;
+  }
+  rhi->DestroyTexture(tex);
+  rhi->DestroyTexture(bc);
+  if (rhi->TextureResidentMips(tex) != 0) {
+    Kizuri::DestroyRHI(rhi);
+    return false;
+  }
+  rhi->Shutdown();
+  Kizuri::DestroyRHI(rhi);
+  return true;
+}
+bool TestTexStreaming() {
+  if (Kizuri::AssetDatabase::SelectMipLevel(5.0f, 7) != 7) {
+    return false;
+  }
+  if (Kizuri::AssetDatabase::SelectMipLevel(20.0f, 7) != 6) {
+    return false;
+  }
+  if (Kizuri::AssetDatabase::SelectMipLevel(50.0f, 7) != 2) {
+    return false;
+  }
+  if (Kizuri::AssetDatabase::SelectMipLevel(200.0f, 7) != 1) {
+    return false;
+  }
+  if (Kizuri::AssetDatabase::SelectMipLevel(200.0f, 1) != 1) {
+    return false;
+  }
+  if (Kizuri::AssetDatabase::SelectMipLevel(5.0f, 0) != 0) {
+    return false;
+  }
+  namespace fs = std::filesystem;
+  fs::path dir = fs::temp_directory_path() / "kzstream_test";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  WriteTestBMP((dir / "wall.bmp").string(), 32, 32, false);
+  Kizuri::AssetDatabase db;
+  db.SetAssetsDir(dir.string());
+  db.Scan();
+  db.DrainBlocking();
+  if (db.AllTexGuids().size() != 1) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  std::string tguid = db.AllTexGuids()[0];
+  Kizuri::MeshAssetData mesh;
+  mesh.guid = "stream-mesh-1";
+  mesh.positions = { 0, 0, 0, 1, 0, 0, 0, 1, 0 };
+  mesh.normals = { 0, 0, 1, 0, 0, 1, 0, 0, 1 };
+  mesh.uvs = { 0, 0, 1, 0, 0, 1 };
+  mesh.indices = { 0, 1, 2 };
+  Kizuri::MeshMaterialData mat;
+  mat.name = "M";
+  mat.albedo[0] = 1.0f;
+  mat.albedo[1] = 1.0f;
+  mat.albedo[2] = 1.0f;
+  mat.metallic = 0.0f;
+  mat.roughness = 0.5f;
+  mat.albedoTexGuid = tguid;
+  mesh.materials.push_back(mat);
+  Kizuri::MeshPartData part;
+  part.indexOffset = 0;
+  part.indexCount = 3;
+  part.material = 0;
+  mesh.parts.push_back(part);
+  mesh.aabbMin[0] = 0.0f;
+  mesh.aabbMin[1] = 0.0f;
+  mesh.aabbMin[2] = 0.0f;
+  mesh.aabbMax[0] = 1.0f;
+  mesh.aabbMax[1] = 1.0f;
+  mesh.aabbMax[2] = 0.0f;
+  mesh.hasSource = false;
+  if (!Kizuri::EncodeMeshFile(mesh, (dir / "stream.kzmesh").string())) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  db.Scan();
+  db.DrainBlocking();
+  const Kizuri::MeshRecord* mr = db.GetByGuid("stream-mesh-1");
+  if (mr == nullptr || !mr->loaded) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  Kizuri::IRHI* rhi = Kizuri::CreateRHI(Kizuri::RHI_API::Null);
+  Kizuri::RHIDesc desc;
+  desc.windowHandle = nullptr;
+  desc.width = 64;
+  desc.height = 64;
+  desc.vsync = false;
+  rhi->Initialize(desc);
+  float camFar[3] = { 500.0f, 0.0f, 0.0f };
+  float obj[3] = { 0.0f, 0.0f, 0.0f };
+  std::vector<Kizuri::MeshUse> uses;
+  Kizuri::MeshUse use;
+  use.meshGuid = "stream-mesh-1";
+  use.pos[0] = 0.0f;
+  use.pos[1] = 0.0f;
+  use.pos[2] = 0.0f;
+  uses.push_back(use);
+  (void)obj;
+  db.UpdateStreaming(camFar, uses);
+  const Kizuri::TextureRecord* tr = db.GetTexByGuid(tguid);
+  if (tr == nullptr || tr->selectedLevels != 1) {
+    Kizuri::DestroyRHI(rhi);
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  size_t d1 = db.DrainUploads(rhi, 1000000);
+  tr = db.GetTexByGuid(tguid);
+  if (d1 != 1 || tr->residentLevels != 1) {
+    Kizuri::DestroyRHI(rhi);
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  float camNear[3] = { 2.0f, 0.0f, 0.0f };
+  db.UpdateStreaming(camNear, uses);
+  tr = db.GetTexByGuid(tguid);
+  int full = static_cast<int>(tr->data.mips.size());
+  if (tr->selectedLevels != full) {
+    Kizuri::DestroyRHI(rhi);
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  size_t d2 = db.DrainUploads(rhi, 1000000);
+  tr = db.GetTexByGuid(tguid);
+  if (tr->residentLevels != full || d2 != static_cast<size_t>(full - 1)) {
+    Kizuri::DestroyRHI(rhi);
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  size_t d3 = db.DrainUploads(rhi, 1);
+  if (d3 != 0) {
+    Kizuri::DestroyRHI(rhi);
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  Kizuri::DestroyRHI(rhi);
+  fs::remove_all(dir, ec);
+  return true;
+}
+bool TestGltfTextured() {
+  namespace fs = std::filesystem;
+  fs::path dir = fs::temp_directory_path() / "kzgltftex_test";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  WriteTestBMP((dir / "t.bmp").string(), 4, 4, false);
+  float tri[9] = { -1.0f, -1.0f, 0.0f, 1.0f, -1.0f, 0.0f, 0.0f, 1.0f, 0.0f };
+  {
+    FILE* fp = std::fopen((dir / "tri.bin").string().c_str(), "wb");
+    std::fwrite(tri, 1, sizeof(tri), fp);
+    std::fclose(fp);
+  }
+  std::string gltf = "{\"asset\":{\"version\":\"2.0\"},\"scene\":0,\"scenes\":[{\"nodes\":[0]}],\"nodes\":[{\"mesh\":0}],\"meshes\":[{\"primitives\":[{\"attributes\":{\"POSITION\":0},\"material\":0}]}],\"materials\":[{\"name\":\"M\",\"pbrMetallicRoughness\":{\"baseColorTexture\":{\"index\":0}}}],\"textures\":[{\"source\":0}],\"images\":[{\"uri\":\"t.bmp\"}],\"buffers\":[{\"uri\":\"tri.bin\",\"byteLength\":36}],\"bufferViews\":[{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36}],\"accessors\":[{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"}]}";
+  {
+    FILE* fp = std::fopen((dir / "tri.gltf").string().c_str(), "wb");
+    std::fwrite(gltf.c_str(), 1, gltf.size(), fp);
+    std::fclose(fp);
+  }
+  Kizuri::MeshAssetData data;
+  if (!Kizuri::ImportGltfMesh((dir / "tri.gltf").string(), "", data, nullptr)) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (data.positions.size() != 9 || data.indices.size() != 3) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (data.materials.empty() || data.materials[0].albedoTexGuid.empty()) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  std::string texFile = (dir / "tri_tex0.kztex").string();
+  if (!fs::exists(texFile, ec)) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  Kizuri::TextureAssetData tex;
+  if (!Kizuri::DecodeTextureFile(texFile, tex) || tex.guid != data.materials[0].albedoTexGuid) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  fs::remove_all(dir, ec);
+  return true;
+}
 }
 int main() {
   std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -1699,6 +2069,11 @@ int main() {
   failures += Check("MeshImport", TestMeshImport());
   failures += Check("AssetDatabase", TestAssetDatabase());
   failures += Check("SceneMeshGuid", TestSceneMeshGuid());
+  failures += Check("TexCodec", TestTexCodec());
+  failures += Check("TexImport", TestTexImport());
+  failures += Check("RHITextures", TestRHITextures());
+  failures += Check("TexStreaming", TestTexStreaming());
+  failures += Check("GltfTextured", TestGltfTextured());
   if (failures == 0) {
     std::printf("KizuriHello: all bootstrap libs linked and functional\n");
   } else {

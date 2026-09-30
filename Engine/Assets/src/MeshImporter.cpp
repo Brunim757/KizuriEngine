@@ -1,12 +1,101 @@
 #include "Kizuri/Assets/MeshImporter.h"
 #include "Kizuri/Assets/Guid.h"
+#include "Kizuri/Assets/TexCodec.h"
+#include "Kizuri/Assets/TextureImporter.h"
 #include "Kizuri/Log.h"
 #include <cgltf.h>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <system_error>
 namespace Kizuri {
 namespace {
+int Base64Value(char c) {
+  if (c >= 'A' && c <= 'Z') {
+    return c - 'A';
+  }
+  if (c >= 'a' && c <= 'z') {
+    return c - 'a' + 26;
+  }
+  if (c >= '0' && c <= '9') {
+    return c - '0' + 52;
+  }
+  if (c == '+' || c == '-') {
+    return 62;
+  }
+  if (c == '/' || c == '_') {
+    return 63;
+  }
+  return -1;
+}
+bool Base64Decode(const std::string& in, std::vector<unsigned char>& out) {
+  out.clear();
+  int bits = 0;
+  int acc = 0;
+  for (size_t i = 0; i < in.size(); ++i) {
+    char c = in[i];
+    if (c == '=' || c == ' ' || c == '\n' || c == '\r' || c == '\t') {
+      continue;
+    }
+    int v = Base64Value(c);
+    if (v < 0) {
+      return false;
+    }
+    acc = (acc << 6) | v;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out.push_back(static_cast<unsigned char>((acc >> bits) & 0xFF));
+    }
+  }
+  return true;
+}
+bool ResolveGltfImage(const cgltf_image* img, const std::string& glbPath, std::vector<unsigned char>& bytes, std::string& nameHint) {
+  bytes.clear();
+  nameHint = "gltf_image";
+  if (img == nullptr) {
+    return false;
+  }
+  if (img->name != nullptr && img->name[0] != '\0') {
+    nameHint = img->name;
+  }
+  if (img->uri != nullptr && img->uri[0] != '\0') {
+    std::string uri(img->uri);
+    if (uri.compare(0, 5, "data:") == 0) {
+      size_t comma = uri.find(',');
+      if (comma == std::string::npos) {
+        return false;
+      }
+      return Base64Decode(uri.substr(comma + 1), bytes) && !bytes.empty();
+    }
+    std::filesystem::path glb(glbPath);
+    std::filesystem::path full = glb.parent_path() / uri;
+    nameHint = full.filename().string();
+    FILE* fp = std::fopen(full.string().c_str(), "rb");
+    if (fp == nullptr) {
+      return false;
+    }
+    std::fseek(fp, 0, SEEK_END);
+    long sz = std::ftell(fp);
+    std::fseek(fp, 0, SEEK_SET);
+    if (sz <= 0) {
+      std::fclose(fp);
+      return false;
+    }
+    bytes.resize(static_cast<size_t>(sz));
+    size_t n = std::fread(bytes.data(), 1, bytes.size(), fp);
+    std::fclose(fp);
+    return n == bytes.size();
+  }
+  if (img->buffer_view != nullptr && img->buffer_view->buffer != nullptr) {
+    const unsigned char* base = static_cast<const unsigned char*>(img->buffer_view->buffer->data);
+    size_t off = img->buffer_view->offset;
+    size_t sz = img->buffer_view->size;
+    bytes.assign(base + off, base + off + sz);
+    return !bytes.empty();
+  }
+  return false;
+}
 bool ReadVec3(const cgltf_accessor* acc, size_t idx, float* v) {
   if (acc == nullptr || acc->type != cgltf_type_vec3 || acc->component_type != cgltf_component_type_r_32f) {
     return false;
@@ -70,6 +159,7 @@ bool ImportGltfMesh(const std::string& glbPath, const std::string& keepGuid, Mes
     return false;
   }
   bool ok = false;
+  int texCounter = 0;
   if (cgltf_load_buffers(&options, data, glbPath.c_str()) == cgltf_result_success && data->meshes_count > 0) {
     ok = true;
     for (size_t mi = 0; mi < data->meshes_count && ok; ++mi) {
@@ -149,6 +239,27 @@ bool ImportGltfMesh(const std::string& glbPath, const std::string& keepGuid, Mes
               md.albedo[2] = prim.material->pbr_metallic_roughness.base_color_factor[2];
               md.metallic = prim.material->pbr_metallic_roughness.metallic_factor;
               md.roughness = prim.material->pbr_metallic_roughness.roughness_factor;
+              const cgltf_texture* ctex = prim.material->pbr_metallic_roughness.base_color_texture.texture;
+              if (ctex != nullptr && ctex->image != nullptr) {
+                std::vector<unsigned char> imgBytes;
+                std::string imgName;
+                if (ResolveGltfImage(ctex->image, glbPath, imgBytes, imgName)) {
+                  std::filesystem::path glbFile(glbPath);
+                  std::string texName = glbFile.stem().string() + "_tex" + std::to_string(texCounter++) + ".kztex";
+                  std::string texOut = (glbFile.parent_path() / texName).string();
+                  std::string keepTex;
+                  TextureAssetData probe;
+                  if (DecodeTextureFile(texOut, probe) && !probe.guid.empty()) {
+                    keepTex = probe.guid;
+                  }
+                  TextureAssetData tdata;
+                  if (ImportTextureMemory(imgBytes.data(), imgBytes.size(), keepTex, tdata, imgName, false, glbPath, hash)) {
+                    if (EncodeTextureFile(tdata, texOut)) {
+                      md.albedoTexGuid = tdata.guid;
+                    }
+                  }
+                }
+              }
             }
             matIndex = static_cast<uint32_t>(out.materials.size());
             out.materials.push_back(md);

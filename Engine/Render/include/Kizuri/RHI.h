@@ -22,6 +22,15 @@ enum class RHIFill {
   Solid,
   Wireframe
 };
+enum class RHITextureFormat {
+  RGBA8_UNORM,
+  RGBA8_UNORM_SRGB,
+  BC1_UNORM,
+  BC1_UNORM_SRGB,
+  BC3_UNORM,
+  BC3_UNORM_SRGB,
+  BC5_UNORM
+};
 using RHIBuffer = uint64_t;
 using RHIConstBuffer = uint64_t;
 using RHIVertexShader = uint64_t;
@@ -29,6 +38,7 @@ using RHIPixelShader = uint64_t;
 using RHIInputLayout = uint64_t;
 using RHIRenderTarget = uint64_t;
 using RHISampler = uint64_t;
+using RHITexture = uint64_t;
 struct RHIDesc {
   void* windowHandle;
   int width;
@@ -99,6 +109,10 @@ public:
   virtual void SetPixelTexture(uint32_t slot, RHIRenderTarget rt) = 0;
   virtual RHISampler CreateSamplerLinear() = 0;
   virtual void SetPixelSampler(uint32_t slot, RHISampler sampler) = 0;
+  virtual RHITexture CreateTexture2D(int w, int h, int mipLevels, RHITextureFormat fmt) = 0;
+  virtual bool UpdateTextureMip(RHITexture tex, int mip, int w, int h, uint32_t rowPitch, const void* data, size_t bytes) = 0;
+  virtual void DestroyTexture(RHITexture tex) = 0;
+  virtual int TextureResidentMips(RHITexture tex) const = 0;
   virtual void DrawIndexed(uint32_t indexCount, uint32_t startIndex, int32_t baseVertex) = 0;
   virtual void DrawFullscreenTriangle() = 0;
 };

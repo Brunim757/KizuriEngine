@@ -1,0 +1,21 @@
+namespace KizuriAssets;
+table MipLevel {
+  width:uint;
+  height:uint;
+  rowPitch:uint;
+  data:[ubyte];
+}
+table TextureAsset {
+  guid:string;
+  width:uint;
+  height:uint;
+  mipCount:uint;
+  format:uint;
+  srgb:bool;
+  hasSource:bool;
+  sourcePath:string;
+  sourceHash:ulong;
+  sourceTimestamp:long;
+  mips:[MipLevel];
+}
+root_type TextureAsset;

@@ -1,6 +1,8 @@
 #pragma once
 #include "Kizuri/Assets/MeshCodec.h"
+#include "Kizuri/Assets/TexCodec.h"
 #include "Kizuri/JobSystem.h"
+#include "Kizuri/RHI.h"
 #include <TaskScheduler.h>
 #include <cstdint>
 #include <map>
@@ -47,6 +49,50 @@ struct ImportMeshTask : public enki::ITaskSet {
   std::mutex* outMutex;
   std::vector<ImportResult>* outQueue;
 };
+enum class TextureAssetState {
+  Ready,
+  Outdated,
+  NoSource,
+  SourceMissing
+};
+struct TextureRecord {
+  std::string guid;
+  std::string texPath;
+  std::string sourcePath;
+  uint64_t sourceHash;
+  bool hasSource;
+  TextureAssetState state;
+  TextureAssetData data;
+  bool loaded;
+  RHITexture gpu;
+  int residentLevels;
+  int selectedLevels;
+};
+struct ImportTexResult {
+  bool ok;
+  size_t taskId;
+  std::string sourcePath;
+  std::string texPath;
+  TextureAssetData data;
+};
+struct ImportTexTask : public enki::ITaskSet {
+  ImportTexTask();
+  void ExecuteRange(enki::TaskSetPartition range, uint32_t threadnum) override;
+  std::string sourcePath;
+  std::string texPath;
+  std::string keepGuid;
+  size_t taskId;
+  std::mutex* outMutex;
+  std::vector<ImportTexResult>* outQueue;
+};
+struct MeshUse {
+  std::string meshGuid;
+  float pos[3];
+};
+struct TexUpload {
+  std::string guid;
+  int mip;
+};
 class AssetDatabase {
 public:
   AssetDatabase();
@@ -65,6 +111,15 @@ public:
   bool RenameAssetFile(const std::string& guid, const std::string& newFileName);
   bool DeleteAssetFile(const std::string& guid, bool force, const std::vector<RefUse>& refs, std::vector<std::string>& blockedBy);
   std::map<std::string, size_t> ComputeRefCounts(const std::vector<RefUse>& refs) const;
+  const TextureRecord* GetTexByGuid(const std::string& guid) const;
+  std::vector<std::string> AllTexGuids() const;
+  bool ReimportTexture(const std::string& guid);
+  bool RenameTextureFile(const std::string& guid, const std::string& newFileName);
+  bool DeleteTextureFile(const std::string& guid, bool force, std::vector<std::string>& blockedBy);
+  std::map<std::string, size_t> ComputeTexRefCounts() const;
+  static int SelectMipLevel(float dist, int mipCount);
+  void UpdateStreaming(const float cameraPos[3], const std::vector<MeshUse>& uses);
+  size_t DrainUploads(IRHI* rhi, size_t maxBytes);
 private:
   std::string assetsDir;
   std::map<std::string, MeshRecord> records;
@@ -73,6 +128,14 @@ private:
   size_t nextTaskId;
   std::vector<std::unique_ptr<ImportMeshTask>> pending;
   std::vector<std::string> inflight;
+  std::vector<std::unique_ptr<ImportTexTask>> pendingTex;
+  std::vector<std::string> inflightTex;
+  std::mutex completedTexMutex;
+  std::vector<ImportTexResult> completedTex;
+  std::map<std::string, TextureRecord> texRecords;
+  std::map<std::string, int64_t> seenTexTime;
+  std::map<std::string, std::string> texPathToGuid;
+  std::vector<TexUpload> uploadQueue;
   std::mutex completedMutex;
   std::vector<ImportResult> completed;
   std::vector<std::string> relocated;
@@ -80,8 +143,11 @@ private:
   std::map<std::string, std::string> pathToGuid;
   void EnsureJobs();
   void EnqueueImport(const std::string& sourcePath, const std::string& meshPath, const std::string& keepGuid);
+  void EnqueueTexImport(const std::string& sourcePath, const std::string& texPath, const std::string& keepGuid);
   void UpsertResult(const ImportResult& result);
+  void UpsertTexResult(const ImportTexResult& result);
   MeshRecord* FindByGuid(const std::string& guid);
   void RefreshRecordState(MeshRecord& record);
+  void RefreshTexRecordState(TextureRecord& record);
 };
 }

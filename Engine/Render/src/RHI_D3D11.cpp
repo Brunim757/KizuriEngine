@@ -8,6 +8,7 @@
 #include <wrl/client.h>
 #include <unordered_map>
 #include <vector>
+#include <set>
 namespace Kizuri {
 using Microsoft::WRL::ComPtr;
 namespace {
@@ -19,6 +20,62 @@ DXGI_FORMAT ToDXGI(RHIFormat f) {
     return DXGI_FORMAT_D24_UNORM_S8_UINT;
   }
   return DXGI_FORMAT_R8G8B8A8_UNORM;
+}
+DXGI_FORMAT ToTextureFormat(RHITextureFormat f) {
+  if (f == RHITextureFormat::RGBA8_UNORM_SRGB) {
+    return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+  }
+  if (f == RHITextureFormat::BC1_UNORM) {
+    return DXGI_FORMAT_BC1_UNORM;
+  }
+  if (f == RHITextureFormat::BC1_UNORM_SRGB) {
+    return DXGI_FORMAT_BC1_UNORM_SRGB;
+  }
+  if (f == RHITextureFormat::BC3_UNORM) {
+    return DXGI_FORMAT_BC3_UNORM;
+  }
+  if (f == RHITextureFormat::BC3_UNORM_SRGB) {
+    return DXGI_FORMAT_BC3_UNORM_SRGB;
+  }
+  if (f == RHITextureFormat::BC5_UNORM) {
+    return DXGI_FORMAT_BC5_UNORM;
+  }
+  return DXGI_FORMAT_R8G8B8A8_UNORM;
+}
+bool CheckTextureMipParams(int tw, int th, int tmips, RHITextureFormat tfmt, int mip, int mw, int mh, uint32_t rowPitch, size_t bytes) {
+  if (mip < 0 || mip >= tmips) {
+    return false;
+  }
+  int ew = tw >> mip;
+  int eh = th >> mip;
+  if (ew < 1) {
+    ew = 1;
+  }
+  if (eh < 1) {
+    eh = 1;
+  }
+  if (mw != ew || mh != eh) {
+    return false;
+  }
+  size_t expect = 0;
+  if (tfmt == RHITextureFormat::RGBA8_UNORM || tfmt == RHITextureFormat::RGBA8_UNORM_SRGB) {
+    if (rowPitch != static_cast<uint32_t>(mw * 4)) {
+      return false;
+    }
+    expect = static_cast<size_t>(rowPitch) * static_cast<size_t>(mh);
+  } else {
+    size_t blockBytes = 16;
+    if (tfmt == RHITextureFormat::BC1_UNORM || tfmt == RHITextureFormat::BC1_UNORM_SRGB) {
+      blockBytes = 8;
+    }
+    size_t blocksX = (static_cast<size_t>(mw) + 3) / 4;
+    size_t blocksY = (static_cast<size_t>(mh) + 3) / 4;
+    if (rowPitch != blocksX * blockBytes) {
+      return false;
+    }
+    expect = rowPitch * blocksY;
+  }
+  return bytes == expect;
 }
 struct TargetRes {
   ComPtr<ID3D11Texture2D> tex;
@@ -716,6 +773,64 @@ public:
     ID3D11SamplerState* s = (it == samplers.end()) ? nullptr : it->second.Get();
     context->PSSetSamplers(slot, 1, &s);
   }
+  RHITexture CreateTexture2D(int tw, int th, int mipLevels, RHITextureFormat fmt) override {
+    if (tw <= 0 || th <= 0 || mipLevels <= 0 || mipLevels > 16) {
+      return 0;
+    }
+    D3D11_TEXTURE2D_DESC td;
+    td.Width = static_cast<UINT>(tw);
+    td.Height = static_cast<UINT>(th);
+    td.MipLevels = static_cast<UINT>(mipLevels);
+    td.ArraySize = 1;
+    td.Format = ToTextureFormat(fmt);
+    td.SampleDesc.Count = 1;
+    td.SampleDesc.Quality = 0;
+    td.Usage = D3D11_USAGE_DEFAULT;
+    td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    td.CPUAccessFlags = 0;
+    td.MiscFlags = 0;
+    ComPtr<ID3D11Texture2D> tex;
+    if (FAILED(device->CreateTexture2D(&td, nullptr, tex.GetAddressOf()))) {
+      return 0;
+    }
+    ComPtr<ID3D11ShaderResourceView> srv;
+    if (FAILED(device->CreateShaderResourceView(tex.Get(), nullptr, srv.GetAddressOf()))) {
+      return 0;
+    }
+    uint64_t id = nextId++;
+    TexEntry entry;
+    entry.tex = tex;
+    entry.srv = srv;
+    entry.w = tw;
+    entry.h = th;
+    entry.mips = mipLevels;
+    entry.fmt = fmt;
+    textures[id] = entry;
+    return id;
+  }
+  bool UpdateTextureMip(RHITexture tex, int mip, int mw, int mh, uint32_t rowPitch, const void* data, size_t bytes) override {
+    auto it = textures.find(tex);
+    if (it == textures.end() || data == nullptr) {
+      return false;
+    }
+    if (!CheckTextureMipParams(it->second.w, it->second.h, it->second.mips, it->second.fmt, mip, mw, mh, rowPitch, bytes)) {
+      return false;
+    }
+    UINT sub = D3D11CalcSubresource(static_cast<UINT>(mip), 0, static_cast<UINT>(it->second.mips));
+    context->UpdateSubresource(it->second.tex.Get(), sub, nullptr, data, rowPitch, 0);
+    it->second.resident.insert(mip);
+    return true;
+  }
+  void DestroyTexture(RHITexture tex) override {
+    textures.erase(tex);
+  }
+  int TextureResidentMips(RHITexture tex) const override {
+    auto it = textures.find(tex);
+    if (it == textures.end()) {
+      return 0;
+    }
+    return static_cast<int>(it->second.resident.size());
+  }
   void DrawIndexed(uint32_t indexCount, uint32_t startIndex, int32_t baseVertex) override {
     context->DrawIndexed(indexCount, startIndex, baseVertex);
   }
@@ -799,6 +914,16 @@ private:
   std::unordered_map<uint64_t, ComPtr<ID3D11InputLayout>> layouts;
   std::unordered_map<uint64_t, TargetRes> targets;
   std::unordered_map<uint64_t, ComPtr<ID3D11SamplerState>> samplers;
+  struct TexEntry {
+    ComPtr<ID3D11Texture2D> tex;
+    ComPtr<ID3D11ShaderResourceView> srv;
+    int w;
+    int h;
+    int mips;
+    RHITextureFormat fmt;
+    std::set<int> resident;
+  };
+  std::unordered_map<uint64_t, TexEntry> textures;
   uint64_t curVS;
   uint64_t curPS;
   uint64_t curLayout;
