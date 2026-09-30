@@ -50,6 +50,7 @@ EditorApp::EditorApp()
   , savePromptQueued(false)
   , restorePromptQueued(false) {
   renameBuf[0] = '\0';
+  showNotifHistory = false;
   MakeIdentityTransform(gizmoStart);
   gizmoTarget = EntityId::Invalid();
   gizmoJustEnded = false;
@@ -116,7 +117,7 @@ bool EditorApp::Initialize() {
     cubeReady = true;
     log.Add(LogLevel::Info, std::string("Mesh loaded: ") + cubePath);
   } else {
-    log.Add(LogLevel::Error, std::string("Mesh load failed: ") + cubePath);
+    Announce(LogLevel::Error, std::string("Mesh load failed: ") + cubePath);
   }
   std::string shaderDir = FindShaderDir();
   if (!renderer.Initialize(rhi, window.Width(), window.Height(), shaderDir.c_str())) {
@@ -175,6 +176,7 @@ int EditorApp::Run() {
     if (autosave.Update(dt, scene, CurrentRecoveryPath())) {
       log.Add(LogLevel::Info, "Autosaved");
     }
+    notifications.Update(dt);
     RawInputPoll::Poll();
     frameDt = dt;
     ImGui_ImplDX11_NewFrame();
@@ -274,6 +276,7 @@ void EditorApp::SelectNewEntity(const std::vector<EntityId>& beforeIds) {
 void EditorApp::DuplicateViaCommand(EntityId id) {
   const Entity* e = scene.Get(id);
   if (e == nullptr) {
+    Announce(LogLevel::Warning, "Cannot duplicate: entity not found");
     return;
   }
   std::string name = e->name;
@@ -283,11 +286,12 @@ void EditorApp::DuplicateViaCommand(EntityId id) {
     return;
   }
   SelectNewEntity(beforeIds);
-  log.Add(LogLevel::Info, std::string("Duplicated ") + name);
+  Announce(LogLevel::Success, std::string("Duplicated ") + name);
 }
 void EditorApp::DeleteViaCommand(EntityId id) {
   const Entity* e = scene.Get(id);
   if (e == nullptr) {
+    Announce(LogLevel::Warning, "Cannot delete: entity not found");
     return;
   }
   std::string name = e->name;
@@ -297,7 +301,7 @@ void EditorApp::DeleteViaCommand(EntityId id) {
   }
   selection.OnEntityDeleted(id);
   SyncSelection();
-  log.Add(LogLevel::Warning, std::string("Deleted ") + name);
+  Announce(LogLevel::Warning, std::string("Deleted ") + name);
 }
 void EditorApp::FocusEntity(EntityId id) {
   const Entity* e = scene.Get(id);
@@ -352,6 +356,7 @@ void EditorApp::Frame() {
   RefreshTitle();
   DrawSavePrompt();
   DrawRestorePrompt();
+  DrawToasts();
 }
 void EditorApp::DrawMenuBar() {
   if (ImGui::BeginMainMenuBar()) {
@@ -584,9 +589,9 @@ void EditorApp::DrawRestorePrompt() {
         undo.Clear();
         autosave.ResetTimer();
         WriteLastScene(currentPath);
-        log.Add(LogLevel::Success, "Recovery restored");
+        Announce(LogLevel::Success, "Recovery restored");
       } else {
-        log.Add(LogLevel::Error, "Recovery restore failed");
+        Announce(LogLevel::Error, "Recovery restore failed");
       }
       DeleteRecoveryFile(rec);
       pendingRestoreMain.clear();
@@ -618,9 +623,9 @@ void EditorApp::DoSaveTo(const std::string& path) {
     autosave.ResetTimer();
     DeleteRecoveryFile(RecoveryPathFor(path, tmpAutosaveDir));
     WriteLastScene(path);
-    log.Add(LogLevel::Success, std::string("Scene saved: ") + path);
+    Announce(LogLevel::Success, std::string("Scene saved: ") + path);
   } else {
-    log.Add(LogLevel::Error, std::string("Scene save failed: ") + path);
+    Announce(LogLevel::Error, std::string("Scene save failed: ") + path);
   }
 }
 void EditorApp::DoOpenPath(const std::string& path) {
@@ -631,9 +636,45 @@ void EditorApp::DoOpenPath(const std::string& path) {
     undo.Clear();
     autosave.ResetTimer();
     WriteLastScene(path);
-    log.Add(LogLevel::Success, std::string("Scene opened: ") + path);
+    Announce(LogLevel::Success, std::string("Scene opened: ") + path);
     OfferRestoreFor(path);
+  } else {
+    Announce(LogLevel::Error, std::string("Scene open failed: ") + path);
   }
+}
+void EditorApp::Announce(LogLevel level, const std::string& text) {
+  log.Add(level, text);
+  notifications.Notify(level, text);
+}
+void EditorApp::DrawToasts() {
+  std::vector<Notification> active = notifications.Active();
+  if (active.empty()) {
+    return;
+  }
+  ImGuiViewport* vp = ImGui::GetMainViewport();
+  ImVec2 pos(vp->WorkPos.x + vp->WorkSize.x - 16.0f, vp->WorkPos.y + vp->WorkSize.y - 16.0f);
+  ImGui::SetNextWindowPos(pos, ImGuiCond_Always, ImVec2(1.0f, 1.0f));
+  ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize;
+  if (ImGui::Begin("##toasts", nullptr, flags)) {
+    for (size_t i = 0; i < active.size(); ++i) {
+      ImVec4 color(0.8f, 0.8f, 0.8f, 1.0f);
+      const char* tag = "INFO";
+      if (active[i].level == LogLevel::Success) {
+        color = ImVec4(0.4f, 1.0f, 0.4f, 1.0f);
+        tag = "OK";
+      } else if (active[i].level == LogLevel::Warning) {
+        color = ImVec4(1.0f, 0.85f, 0.3f, 1.0f);
+        tag = "WARN";
+      } else if (active[i].level == LogLevel::Error) {
+        color = ImVec4(1.0f, 0.4f, 0.4f, 1.0f);
+        tag = "ERROR";
+      }
+      ImGui::PushStyleColor(ImGuiCol_Text, color);
+      ImGui::Text("[%s] %s", tag, active[i].text.c_str());
+      ImGui::PopStyleColor();
+    }
+  }
+  ImGui::End();
 }
 void EditorApp::DrawSavePrompt() {
   if (ImGui::BeginPopupModal("Unsaved Changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {

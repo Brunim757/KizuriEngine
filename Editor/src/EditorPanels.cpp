@@ -598,7 +598,7 @@ void EditorApp::DrawInspector() {
     if (s_hasClipboard) {
       edits.PushTransform(e->id, s_clipboard);
     } else {
-      log.Add(LogLevel::Warning, "Clipboard empty");
+      Announce(LogLevel::Warning, "Clipboard empty");
     }
   }
   ImGui::End();
@@ -610,7 +610,34 @@ void EditorApp::DrawConsole() {
   }
   ImGui::SameLine();
   ImGui::Text("%llu messages", (unsigned long long)log.Count());
+  ImGui::SameLine();
+  if (ImGui::Button(showNotifHistory ? "Hide Notifications" : "Notifications")) {
+    showNotifHistory = !showNotifHistory;
+  }
   ImGui::Separator();
+  if (showNotifHistory) {
+    std::vector<Notification> hist = notifications.History();
+    ImGui::BeginChild("NotifHistory", ImVec2(0, 120), true);
+    for (size_t i = 0; i < hist.size(); ++i) {
+      ImVec4 color(0.8f, 0.8f, 0.8f, 1.0f);
+      const char* tag = "INFO";
+      if (hist[i].level == LogLevel::Success) {
+        color = ImVec4(0.4f, 1.0f, 0.4f, 1.0f);
+        tag = "OK";
+      } else if (hist[i].level == LogLevel::Warning) {
+        color = ImVec4(1.0f, 0.85f, 0.3f, 1.0f);
+        tag = "WARN";
+      } else if (hist[i].level == LogLevel::Error) {
+        color = ImVec4(1.0f, 0.4f, 0.4f, 1.0f);
+        tag = "ERROR";
+      }
+      ImGui::PushStyleColor(ImGuiCol_Text, color);
+      ImGui::Text("[%s] %s", tag, hist[i].text.c_str());
+      ImGui::PopStyleColor();
+    }
+    ImGui::EndChild();
+    ImGui::Separator();
+  }
   ImGui::BeginChild("ConsoleScroll", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
   for (size_t i = 0; i < log.Count(); ++i) {
     const LogEntry& entry = log.At(i);

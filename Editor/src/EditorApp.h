@@ -5,6 +5,7 @@
 #include "Kizuri/EditQueue.h"
 #include "Kizuri/Undo.h"
 #include "Kizuri/Autosave.h"
+#include "Kizuri/Notifications.h"
 #include "Kizuri/Window.h"
 #include "Kizuri/RHI.h"
 #include "Kizuri/Camera.h"
@@ -20,6 +21,8 @@ struct EditorApp {
   Scene scene;
   SelectionSet selection;
   LogStore log;
+  NotificationCenter notifications;
+  bool showNotifHistory;
   EditQueue edits;
   UndoStack undo;
   bool gizmoDragging;
@@ -83,6 +86,8 @@ struct EditorApp {
   void DrawHierarchy();
   void DrawInspector();
   void DrawConsole();
+  void DrawToasts();
+  void Announce(LogLevel level, const std::string& text);
   void RenderScene();
   void UpdateCamera(float dt, bool lookNow);
   void HandleViewportClick();

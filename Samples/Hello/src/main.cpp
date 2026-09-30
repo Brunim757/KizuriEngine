@@ -21,6 +21,7 @@
 #include "Kizuri/SceneSerializer.h"
 #include "Kizuri/Undo.h"
 #include "Kizuri/Autosave.h"
+#include "Kizuri/Notifications.h"
 #include <DirectXMath.h>
 #include <filesystem>
 #include <TaskScheduler.h>
@@ -1216,6 +1217,41 @@ bool TestAutosaveOffer() {
   std::filesystem::remove_all(dir, ec);
   return true;
 }
+bool TestNotifications() {
+  Kizuri::NotificationCenter n;
+  if (n.Lifetime() != 4.0 || n.ActiveCount() != 0 || n.HistoryCount() != 0) {
+    return false;
+  }
+  n.Notify(Kizuri::LogLevel::Info, "a");
+  n.Notify(Kizuri::LogLevel::Error, "b");
+  if (n.ActiveCount() != 2 || n.HistoryCount() != 2) {
+    return false;
+  }
+  std::vector<Kizuri::Notification> active = n.Active();
+  if (active[0].text != "a" || active[1].level != Kizuri::LogLevel::Error) {
+    return false;
+  }
+  if (active[0].seq >= active[1].seq) {
+    return false;
+  }
+  n.Update(5.0);
+  if (n.ActiveCount() != 0 || n.HistoryCount() != 2) {
+    return false;
+  }
+  for (int i = 0; i < 25; ++i) {
+    n.Notify(Kizuri::LogLevel::Warning, "spam");
+  }
+  if (n.HistoryCount() != 20 || n.ActiveCount() != 25) {
+    return false;
+  }
+  n.SetLifetime(1.0);
+  n.Update(1.5);
+  if (n.ActiveCount() != 0 || n.HistoryCount() != 20) {
+    return false;
+  }
+  n.Clear();
+  return n.ActiveCount() == 0 && n.HistoryCount() == 0;
+}
 }
 int main() {
   std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -1266,6 +1302,7 @@ int main() {
   failures += Check("Autosave-Paths", TestAutosavePaths());
   failures += Check("Autosave-Update", TestAutosaveUpdate());
   failures += Check("Autosave-Offer", TestAutosaveOffer());
+  failures += Check("Notifications", TestNotifications());
   if (failures == 0) {
     std::printf("KizuriHello: all bootstrap libs linked and functional\n");
   } else {
