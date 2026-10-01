@@ -1,4 +1,5 @@
 #include "Kizuri/Assets/MeshCodec.h"
+#include "ZstdStream.h"
 #include "kzassets_generated.h"
 #include <flatbuffers/flatbuffers.h>
 #include <zstd.h>
@@ -141,7 +142,6 @@ bool EncodeMeshMemory(const MeshAssetData& data, std::vector<unsigned char>& out
   std::memcpy(&out[16], comp.data(), csize);
   return true;
 }
-#include "ZstdStream.h"
 bool DecodeMeshMemory(const void* bytes, size_t size, MeshAssetData& out) {
   out = MeshAssetData();
   if (bytes == nullptr || size < 16) {

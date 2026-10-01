@@ -1,4 +1,5 @@
 #include "Kizuri/Assets/TexCodec.h"
+#include "ZstdStream.h"
 #include "kztex_generated.h"
 #include <flatbuffers/flatbuffers.h>
 #include <zstd.h>
@@ -119,7 +120,6 @@ bool DecodeTextureMemory(const void* bytes, size_t size, TextureAssetData& out) 
   out.sourceTimestamp = tex->sourceTimestamp();
   return true;
 }
-#include "ZstdStream.h"
 bool EncodeTextureFile(const TextureAssetData& data, const std::string& path) {
   if (data.guid.empty() || data.width == 0 || data.height == 0 || data.mips.empty()) {
     return false;
