@@ -59,16 +59,7 @@ void ComputeAABB(const std::vector<float>& positions, float outMin[3], float out
     }
   }
 }
-bool EncodeMeshMemory(const MeshAssetData& data, std::vector<unsigned char>& out) {
-  out.clear();
-  if (data.guid.empty() || data.positions.empty() || data.indices.empty()) {
-    return false;
-  }
-  size_t vertexCount = data.positions.size() / 3;
-  if (data.normals.size() != data.positions.size() || data.uvs.size() != vertexCount * 2) {
-    return false;
-  }
-  flatbuffers::FlatBufferBuilder builder(4096);
+bool AppendMeshFlatBuffer(const MeshAssetData& data, size_t vertexCount, flatbuffers::FlatBufferBuilder& builder) {
   std::vector<unsigned char> verts(vertexCount * 32);
   for (size_t i = 0; i < vertexCount; ++i) {
     float* dst = reinterpret_cast<float*>(&verts[i * 32]);
@@ -84,7 +75,11 @@ bool EncodeMeshMemory(const MeshAssetData& data, std::vector<unsigned char>& out
   std::vector<unsigned char> idx(data.indices.size() * 4);
   std::memcpy(idx.data(), data.indices.data(), idx.size());
   auto fbVerts = builder.CreateVector(verts);
+  verts.clear();
+  verts.shrink_to_fit();
   auto fbIdx = builder.CreateVector(idx);
+  idx.clear();
+  idx.shrink_to_fit();
   auto fbGuid = builder.CreateString(data.guid);
   auto fbSourcePath = builder.CreateString(data.sourcePath);
   std::vector<flatbuffers::Offset<KizuriAssets::MaterialSlot>> fbMats;
@@ -106,6 +101,29 @@ bool EncodeMeshMemory(const MeshAssetData& data, std::vector<unsigned char>& out
   KizuriAssets::AABB bounds(bmin, bmax);
   auto mesh = KizuriAssets::CreateMeshAsset(builder, fbGuid, fbVerts, static_cast<uint32_t>(vertexCount), 32, fbIdx, static_cast<uint32_t>(data.indices.size()), &bounds, fbMatsVec, fbPartsVec, data.hasSource, fbSourcePath, data.sourceHash, static_cast<int64_t>(data.sourceTimestamp));
   builder.Finish(mesh);
+  return true;
+}
+bool ValidateMeshData(const MeshAssetData& data, size_t& vertexCount) {
+  if (data.guid.empty() || data.positions.empty() || data.indices.empty()) {
+    return false;
+  }
+  vertexCount = data.positions.size() / 3;
+  if (data.normals.size() != data.positions.size() || data.uvs.size() != vertexCount * 2) {
+    return false;
+  }
+  return true;
+}
+bool EncodeMeshMemory(const MeshAssetData& data, std::vector<unsigned char>& out) {
+  out.clear();
+  size_t vertexCount = 0;
+  if (!ValidateMeshData(data, vertexCount)) {
+    return false;
+  }
+  size_t hint = vertexCount * 32 + data.indices.size() * 4 + 1024;
+  flatbuffers::FlatBufferBuilder builder(hint);
+  if (!AppendMeshFlatBuffer(data, vertexCount, builder)) {
+    return false;
+  }
   size_t fbSize = builder.GetSize();
   size_t bound = ZSTD_compressBound(fbSize);
   std::vector<unsigned char> comp(bound);
@@ -123,6 +141,7 @@ bool EncodeMeshMemory(const MeshAssetData& data, std::vector<unsigned char>& out
   std::memcpy(&out[16], comp.data(), csize);
   return true;
 }
+#include "ZstdStream.h"
 bool DecodeMeshMemory(const void* bytes, size_t size, MeshAssetData& out) {
   out = MeshAssetData();
   if (bytes == nullptr || size < 16) {
@@ -216,17 +235,36 @@ bool DecodeMeshMemory(const void* bytes, size_t size, MeshAssetData& out) {
   return true;
 }
 bool EncodeMeshFile(const MeshAssetData& data, const std::string& path) {
-  std::vector<unsigned char> bytes;
-  if (!EncodeMeshMemory(data, bytes)) {
+  size_t vertexCount = 0;
+  if (!ValidateMeshData(data, vertexCount)) {
     return false;
   }
+  size_t hint = vertexCount * 32 + data.indices.size() * 4 + 1024;
+  flatbuffers::FlatBufferBuilder builder(hint);
+  if (!AppendMeshFlatBuffer(data, vertexCount, builder)) {
+    return false;
+  }
+  size_t fbSize = builder.GetSize();
   FILE* fp = std::fopen(path.c_str(), "wb");
   if (fp == nullptr) {
     return false;
   }
-  size_t n = std::fwrite(bytes.data(), 1, bytes.size(), fp);
+  unsigned char header[16];
+  header[0] = kMagic[0];
+  header[1] = kMagic[1];
+  header[2] = kMagic[2];
+  header[3] = kMagic[3];
+  WriteU32(&header[4], kVersion);
+  WriteU64(&header[8], static_cast<uint64_t>(fbSize));
+  bool ok = std::fwrite(header, 1, sizeof(header), fp) == sizeof(header);
+  if (ok) {
+    ok = StreamZstdToFile(builder.GetBufferPointer(), fbSize, fp);
+  }
   std::fclose(fp);
-  return n == bytes.size();
+  if (!ok) {
+    std::remove(path.c_str());
+  }
+  return ok;
 }
 bool DecodeMeshFile(const std::string& path, MeshAssetData& out) {
   FILE* fp = std::fopen(path.c_str(), "rb");

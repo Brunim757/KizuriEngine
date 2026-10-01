@@ -119,18 +119,52 @@ bool DecodeTextureMemory(const void* bytes, size_t size, TextureAssetData& out) 
   out.sourceTimestamp = tex->sourceTimestamp();
   return true;
 }
+#include "ZstdStream.h"
 bool EncodeTextureFile(const TextureAssetData& data, const std::string& path) {
-  std::vector<unsigned char> bytes;
-  if (!EncodeTextureMemory(data, bytes)) {
+  if (data.guid.empty() || data.width == 0 || data.height == 0 || data.mips.empty()) {
     return false;
   }
+  size_t total = 0;
+  for (size_t i = 0; i < data.mips.size(); ++i) {
+    total += data.mips[i].data.size();
+  }
+  size_t hint = total + 1024;
+  flatbuffers::FlatBufferBuilder builder(hint);
+  std::vector<flatbuffers::Offset<KizuriAssets::MipLevel>> fbMips;
+  for (size_t i = 0; i < data.mips.size(); ++i) {
+    const TextureMipData& mip = data.mips[i];
+    if (mip.data.empty()) {
+      return false;
+    }
+    auto fbData = builder.CreateVector(mip.data);
+    fbMips.push_back(KizuriAssets::CreateMipLevel(builder, mip.width, mip.height, mip.rowPitch, fbData));
+  }
+  auto fbMipsVec = builder.CreateVector(fbMips);
+  auto fbGuid = builder.CreateString(data.guid);
+  auto fbSourcePath = builder.CreateString(data.sourcePath);
+  auto tex = KizuriAssets::CreateTextureAsset(builder, fbGuid, data.width, data.height, static_cast<uint32_t>(data.mips.size()), static_cast<uint32_t>(data.format), data.srgb, data.hasSource, fbSourcePath, data.sourceHash, static_cast<int64_t>(data.sourceTimestamp), fbMipsVec);
+  builder.Finish(tex);
+  size_t fbSize = builder.GetSize();
   FILE* fp = std::fopen(path.c_str(), "wb");
   if (fp == nullptr) {
     return false;
   }
-  size_t n = std::fwrite(bytes.data(), 1, bytes.size(), fp);
+  unsigned char header[16];
+  header[0] = kMagic[0];
+  header[1] = kMagic[1];
+  header[2] = kMagic[2];
+  header[3] = kMagic[3];
+  WriteU32(&header[4], kVersion);
+  WriteU64(&header[8], static_cast<uint64_t>(fbSize));
+  bool ok = std::fwrite(header, 1, sizeof(header), fp) == sizeof(header);
+  if (ok) {
+    ok = StreamZstdToFile(builder.GetBufferPointer(), fbSize, fp);
+  }
   std::fclose(fp);
-  return n == bytes.size();
+  if (!ok) {
+    std::remove(path.c_str());
+  }
+  return ok;
 }
 bool DecodeTextureFile(const std::string& path, TextureAssetData& out) {
   FILE* fp = std::fopen(path.c_str(), "rb");

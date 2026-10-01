@@ -4,8 +4,10 @@
 #include "Kizuri/JobSystem.h"
 #include "Kizuri/RHI.h"
 #include <TaskScheduler.h>
+#include <atomic>
 #include <cstdint>
 #include <map>
+#include <utility>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -54,6 +56,7 @@ struct ImportMeshTask : public enki::ITaskSet {
   std::string meshPath;
   std::string keepGuid;
   size_t taskId;
+  std::atomic<int> progress;
   std::mutex* outMutex;
   std::vector<ImportResult>* outQueue;
 };
@@ -91,6 +94,7 @@ struct ImportTexTask : public enki::ITaskSet {
   std::string texPath;
   std::string keepGuid;
   size_t taskId;
+  std::atomic<int> progress;
   std::mutex* outMutex;
   std::vector<ImportTexResult>* outQueue;
 };
@@ -111,6 +115,7 @@ public:
   size_t DrainCompleted();
   size_t PendingImports() const;
   void DrainBlocking();
+  std::vector<std::pair<std::string, int>> ImportingNow() const;
   const MeshRecord* GetByGuid(const std::string& guid) const;
   const MeshRecord* GetByMeshPath(const std::string& path) const;
   std::vector<std::string> AllGuids() const;

@@ -764,9 +764,9 @@ void EditorApp::DrawAssetBrowser() {
   }
   ImGui::SameLine();
   ImGui::Text("%s", assets.AssetsDir().c_str());
-  if (assets.PendingImports() > 0) {
-    ImGui::SameLine();
-    ImGui::Text("Importing %llu...", (unsigned long long)assets.PendingImports());
+  std::vector<std::pair<std::string, int>> importing = assets.ImportingNow();
+  for (size_t i = 0; i < importing.size(); ++i) {
+    ImGui::Text("Importing %s... %d%%", importing[i].first.c_str(), importing[i].second);
   }
   ImGui::Separator();
   ImGui::Text("Meshes:");

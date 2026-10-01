@@ -27,6 +27,7 @@ RHITextureFormat ToRHIFormat(TexFormat fmt, bool srgb) {
 }
 ImportMeshTask::ImportMeshTask()
   : taskId(0)
+  , progress(0)
   , outMutex(nullptr)
   , outQueue(nullptr) {
   m_SetSize = 1;
@@ -34,16 +35,19 @@ ImportMeshTask::ImportMeshTask()
 void ImportMeshTask::ExecuteRange(enki::TaskSetPartition range, uint32_t threadnum) {
   (void)range;
   (void)threadnum;
+  progress = 10;
   ImportResult result;
   result.ok = false;
   result.taskId = taskId;
   result.sourcePath = sourcePath;
   result.meshPath = meshPath;
   if (ImportGltfMesh(sourcePath, keepGuid, result.data, nullptr)) {
+    progress = 60;
     if (EncodeMeshFile(result.data, meshPath)) {
       result.ok = true;
     }
   }
+  progress = 100;
   if (outMutex != nullptr && outQueue != nullptr) {
     std::lock_guard<std::mutex> lock(*outMutex);
     outQueue->push_back(result);
@@ -355,6 +359,7 @@ void AssetDatabase::Scan() {
 }
 ImportTexTask::ImportTexTask()
   : taskId(0)
+  , progress(0)
   , outMutex(nullptr)
   , outQueue(nullptr) {
   m_SetSize = 1;
@@ -362,16 +367,19 @@ ImportTexTask::ImportTexTask()
 void ImportTexTask::ExecuteRange(enki::TaskSetPartition range, uint32_t threadnum) {
   (void)range;
   (void)threadnum;
+  progress = 10;
   ImportTexResult result;
   result.ok = false;
   result.taskId = taskId;
   result.sourcePath = sourcePath;
   result.texPath = texPath;
   if (ImportTextureFile(sourcePath, keepGuid, result.data)) {
+    progress = 60;
     if (EncodeTextureFile(result.data, texPath)) {
       result.ok = true;
     }
   }
+  progress = 100;
   if (outMutex != nullptr && outQueue != nullptr) {
     std::lock_guard<std::mutex> lock(*outMutex);
     outQueue->push_back(result);
@@ -492,6 +500,26 @@ size_t AssetDatabase::DrainCompleted() {
 }
 size_t AssetDatabase::PendingImports() const {
   return pending.size() + pendingTex.size();
+}
+std::vector<std::pair<std::string, int>> AssetDatabase::ImportingNow() const {
+  std::vector<std::pair<std::string, int>> out;
+  for (size_t i = 0; i < pending.size(); ++i) {
+    std::string name = pending[i]->sourcePath;
+    size_t slash = name.find_last_of("/\\");
+    if (slash != std::string::npos) {
+      name = name.substr(slash + 1);
+    }
+    out.push_back(std::make_pair(name, pending[i]->progress.load()));
+  }
+  for (size_t i = 0; i < pendingTex.size(); ++i) {
+    std::string name = pendingTex[i]->sourcePath;
+    size_t slash = name.find_last_of("/\\");
+    if (slash != std::string::npos) {
+      name = name.substr(slash + 1);
+    }
+    out.push_back(std::make_pair(name, pendingTex[i]->progress.load()));
+  }
+  return out;
 }
 void AssetDatabase::DrainBlocking() {
   for (size_t i = 0; i < pending.size(); ++i) {
