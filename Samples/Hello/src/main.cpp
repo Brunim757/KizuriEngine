@@ -1512,7 +1512,7 @@ bool TestAssetDatabase() {
     fs::remove_all(dir, ec);
     return false;
   }
-  fs::copy_file(fs::temp_directory_path() / "kzdb_backup.glb", dir / "Sub" / "moved_cube.glb", ec);
+  fs::copy_file(fs::temp_directory_path() / "kzdb_backup.glb", dir / "Sub" / "moved2.glb", ec);
   if (ec) {
     fs::remove_all(dir, ec);
     return false;
@@ -1522,8 +1522,13 @@ bool TestAssetDatabase() {
     fs::remove_all(dir, ec);
     return false;
   }
+  db.DrainBlocking();
   rec = db.GetByGuid(guid);
   if (rec == nullptr || rec->state != Kizuri::MeshAssetState::Ready) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (rec->sourcePath.find("moved2.glb") == std::string::npos) {
     fs::remove_all(dir, ec);
     return false;
   }
@@ -1606,6 +1611,52 @@ bool TestAssetDatabase() {
   }
   orec = db.GetByGuid(orphan.guid);
   if (orec == nullptr || orec->meshPath.find("renamed_orphan.kzmesh") == std::string::npos) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  fs::remove_all(dir, ec);
+  return true;
+}
+bool TestImportNoRetry() {
+  namespace fs = std::filesystem;
+  fs::path dir = fs::temp_directory_path() / "kznoretry_test";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  {
+    FILE* fp = std::fopen((dir / "garbage.glb").string().c_str(), "wb");
+    std::fputs("NOT GLTF {{{{", fp);
+    std::fclose(fp);
+  }
+  Kizuri::AssetDatabase db;
+  db.SetAssetsDir(dir.string());
+  db.Scan();
+  db.DrainBlocking();
+  if (!db.AllGuids().empty()) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  db.Scan();
+  db.DrainBlocking();
+  if (db.PendingImports() != 0 || !db.AllGuids().empty()) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  fs::copy_file("Samples/Assets/cube.gltf", dir / "garbage.glb", fs::copy_options::overwrite_existing, ec);
+  if (ec) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  db.Scan();
+  db.DrainBlocking();
+  db.Scan();
+  db.DrainBlocking();
+  if (db.AllGuids().size() != 1) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  const Kizuri::MeshRecord* rec = db.GetByGuid(db.AllGuids()[0]);
+  if (rec == nullptr || rec->state != Kizuri::MeshAssetState::Ready) {
     fs::remove_all(dir, ec);
     return false;
   }
@@ -2210,6 +2261,8 @@ bool TestDbTextures() {
     fs::remove_all(dir, ec);
     return false;
   }
+  db.Scan();
+  db.DrainBlocking();
   tr = db.GetTexByGuid(tguid);
   if (tr == nullptr || tr->state != Kizuri::TextureAssetState::Ready) {
     fs::remove_all(dir, ec);
@@ -2229,6 +2282,12 @@ bool TestDbTextures() {
   }
   fs::copy_file(fs::temp_directory_path() / "kzdbtex_backup.bmp", dir / "Sub" / "moved.bmp", ec);
   if (db.RelocateMissing() != 1) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  db.DrainBlocking();
+  tr = db.GetTexByGuid(tguid);
+  if (tr == nullptr || tr->state != Kizuri::TextureAssetState::Ready) {
     fs::remove_all(dir, ec);
     return false;
   }
@@ -2493,6 +2552,7 @@ int main() {
   failures += Check("MeshImport", TestMeshImport());
   failures += Check("AssetDatabase", TestAssetDatabase());
   failures += Check("SceneMeshGuid", TestSceneMeshGuid());
+  failures += Check("ImportNoRetry", TestImportNoRetry());
   failures += Check("TexCodec", TestTexCodec());
   failures += Check("TexImport", TestTexImport());
   failures += Check("TexImportOpaque", TestTexImportOpaque());

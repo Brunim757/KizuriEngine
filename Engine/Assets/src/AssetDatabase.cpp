@@ -41,7 +41,12 @@ void ImportMeshTask::ExecuteRange(enki::TaskSetPartition range, uint32_t threadn
   result.taskId = taskId;
   result.sourcePath = sourcePath;
   result.meshPath = meshPath;
-  if (ImportGltfMesh(sourcePath, keepGuid, result.data, nullptr)) {
+  if (sourcePath.empty()) {
+    if (DecodeMeshFile(meshPath, result.data) && !result.data.guid.empty()) {
+      result.ok = true;
+      result.sourcePath = meshPath;
+    }
+  } else if (ImportGltfMesh(sourcePath, keepGuid, result.data, nullptr)) {
     progress = 60;
     if (EncodeMeshFile(result.data, meshPath)) {
       result.ok = true;
@@ -87,29 +92,6 @@ MeshRecord* AssetDatabase::FindByGuid(const std::string& guid) {
   auto it = records.find(guid);
   return it == records.end() ? nullptr : &it->second;
 }
-void AssetDatabase::RefreshRecordState(MeshRecord& record) {
-  if (!record.hasSource) {
-    record.state = MeshAssetState::NoSource;
-    return;
-  }
-  std::error_code ec;
-  std::filesystem::file_time_type ft = std::filesystem::last_write_time(record.sourcePath, ec);
-  if (ec) {
-    record.state = MeshAssetState::SourceMissing;
-    return;
-  }
-  int64_t ticks = static_cast<int64_t>(ft.time_since_epoch().count());
-  if (ticks == record.lastSeenSourceTime) {
-    return;
-  }
-  uint64_t hash = 0;
-  if (!Fnv1a64File(record.sourcePath, hash)) {
-    record.state = MeshAssetState::SourceMissing;
-    return;
-  }
-  record.lastSeenSourceTime = ticks;
-  record.state = (hash == record.sourceHash) ? MeshAssetState::Ready : MeshAssetState::Outdated;
-}
 void AssetDatabase::Scan() {
   relocated.clear();
   if (assetsDir.empty()) {
@@ -143,215 +125,141 @@ void AssetDatabase::Scan() {
   }
   for (size_t i = 0; i < kzmeshFiles.size(); ++i) {
     int64_t mtime = 0;
-    std::filesystem::file_time_type ft = std::filesystem::last_write_time(kzmeshFiles[i], ec);
-    if (!ec) {
-      mtime = static_cast<int64_t>(ft.time_since_epoch().count());
-    }
+    StatTime(kzmeshFiles[i], mtime);
     auto pg = pathToGuid.find(kzmeshFiles[i]);
     if (pg != pathToGuid.end()) {
       MeshRecord* known = FindByGuid(pg->second);
       auto st = seenMeshTime.find(kzmeshFiles[i]);
       if (known != nullptr && st != seenMeshTime.end() && st->second == mtime) {
-        RefreshRecordState(*known);
         continue;
       }
     }
-    MeshAssetData data;
-    if (!DecodeMeshFile(kzmeshFiles[i], data) || data.guid.empty()) {
+    auto fd = failedDecode.find(kzmeshFiles[i]);
+    if (fd != failedDecode.end() && fd->second == mtime) {
       continue;
     }
-    MeshRecord* existing = FindByGuid(data.guid);
-    if (existing != nullptr) {
-      DropMeshGpu(*existing);
-      existing->meshPath = kzmeshFiles[i];
-      existing->sourcePath = data.sourcePath;
-      existing->sourceHash = data.sourceHash;
-      existing->hasSource = data.hasSource;
-      existing->data = data;
-      existing->loaded = true;
-      existing->lastSeenSourceTime = 0;
-      RefreshRecordState(*existing);
-    } else {
-      MeshRecord record;
-      record.guid = data.guid;
-      record.meshPath = kzmeshFiles[i];
-      record.sourcePath = data.sourcePath;
-      record.sourceHash = data.sourceHash;
-      record.hasSource = data.hasSource;
-      record.data = data;
-      record.loaded = true;
-      record.lastSeenSourceTime = 0;
-      record.gpuVB = 0;
-      record.gpuIB = 0;
-      record.gpuCount = 0;
-      record.gpuReady = false;
-      RefreshRecordState(record);
-      records[record.guid] = record;
+    bool flying = false;
+    for (size_t k = 0; k < inflight.size(); ++k) {
+      if (inflight[k] == kzmeshFiles[i]) {
+        flying = true;
+        break;
+      }
     }
-    pathToGuid[kzmeshFiles[i]] = data.guid;
-    seenMeshTime[kzmeshFiles[i]] = mtime;
+    if (flying || DecodePendingFor(kzmeshFiles[i])) {
+      continue;
+    }
+    EnqueueDecode(kzmeshFiles[i], false);
+    inflight.push_back(kzmeshFiles[i]);
   }
   for (size_t i = 0; i < glbFiles.size(); ++i) {
     bool known = false;
     for (auto& kv : records) {
       if (kv.second.hasSource && kv.second.sourcePath == glbFiles[i]) {
         known = true;
-        RefreshRecordState(kv.second);
         break;
       }
     }
     if (known) {
       continue;
     }
-    uint64_t probeHash = 0;
-    bool reconnected = false;
-    if (Fnv1a64File(glbFiles[i], probeHash)) {
-      for (auto& kv : records) {
-        if (kv.second.hasSource && kv.second.state == MeshAssetState::SourceMissing && kv.second.sourceHash == probeHash) {
-          kv.second.sourcePath = glbFiles[i];
-          kv.second.data.sourcePath = glbFiles[i];
-          EncodeMeshFile(kv.second.data, kv.second.meshPath);
-          kv.second.state = MeshAssetState::Ready;
-          std::filesystem::path mp(kv.second.meshPath);
-          relocated.push_back(mp.filename().string());
-          reconnected = true;
-          break;
-        }
-      }
-    }
-    if (reconnected) {
+    if (HashPendingForPath(glbFiles[i])) {
       continue;
     }
-    bool flying = false;
-    for (size_t k = 0; k < inflight.size(); ++k) {
-      if (inflight[k] == glbFiles[i]) {
-        flying = true;
-        break;
-      }
-    }
-    if (flying) {
-      continue;
-    }
-    std::filesystem::path glb(glbFiles[i]);
-    std::filesystem::path out = glb;
-    out.replace_extension(".kzmesh");
-    bool outExists = std::filesystem::exists(out, ec) && !ec;
-    if (outExists) {
-      MeshAssetData probe;
-      if (DecodeMeshFile(out.string(), probe) && !probe.guid.empty()) {
-        continue;
-      }
-    }
-    EnqueueImport(glbFiles[i], out.string(), "");
-    inflight.push_back(glbFiles[i]);
+    EnqueueHash(glbFiles[i], "", false);
   }
   for (size_t i = 0; i < kztexFiles.size(); ++i) {
     int64_t mtime = 0;
-    std::filesystem::file_time_type ft = std::filesystem::last_write_time(kztexFiles[i], ec);
-    if (!ec) {
-      mtime = static_cast<int64_t>(ft.time_since_epoch().count());
-    }
+    StatTime(kztexFiles[i], mtime);
     auto pg = texPathToGuid.find(kztexFiles[i]);
     if (pg != texPathToGuid.end()) {
       auto tr = texRecords.find(pg->second);
       auto st = seenTexTime.find(kztexFiles[i]);
       if (tr != texRecords.end() && st != seenTexTime.end() && st->second == mtime) {
-        RefreshTexRecordState(tr->second);
         continue;
       }
     }
-    TextureAssetData data;
-    if (!DecodeTextureFile(kztexFiles[i], data) || data.guid.empty()) {
+    auto fd = failedDecode.find(kztexFiles[i]);
+    if (fd != failedDecode.end() && fd->second == mtime) {
       continue;
     }
-    auto existing = texRecords.find(data.guid);
-    if (existing != texRecords.end()) {
-      DropTexGpu(existing->second);
-      existing->second.texPath = kztexFiles[i];
-      existing->second.sourcePath = data.sourcePath;
-      existing->second.sourceHash = data.sourceHash;
-      existing->second.hasSource = data.hasSource;
-      existing->second.data = data;
-      existing->second.loaded = true;
-      existing->second.lastSeenSourceTime = 0;
-      RefreshTexRecordState(existing->second);
-    } else {
-      TextureRecord record;
-      record.guid = data.guid;
-      record.texPath = kztexFiles[i];
-      record.sourcePath = data.sourcePath;
-      record.sourceHash = data.sourceHash;
-      record.hasSource = data.hasSource;
-      record.data = data;
-      record.loaded = true;
-      record.lastSeenSourceTime = 0;
-      record.gpu = 0;
-      record.residentLevels = 0;
-      record.selectedLevels = 0;
-      RefreshTexRecordState(record);
-      texRecords[record.guid] = record;
+    if (DecodePendingFor(kztexFiles[i])) {
+      continue;
     }
-    texPathToGuid[kztexFiles[i]] = data.guid;
-    seenTexTime[kztexFiles[i]] = mtime;
+    EnqueueDecode(kztexFiles[i], true);
+    inflightTex.push_back(kztexFiles[i]);
   }
   for (size_t i = 0; i < imgFiles.size(); ++i) {
     bool known = false;
     for (auto& kv : texRecords) {
       if (kv.second.hasSource && kv.second.sourcePath == imgFiles[i]) {
         known = true;
-        RefreshTexRecordState(kv.second);
         break;
       }
     }
     if (known) {
       continue;
     }
-    uint64_t probeHash = 0;
-    bool reconnected = false;
-    if (Fnv1a64File(imgFiles[i], probeHash)) {
-      for (auto& kv : texRecords) {
-        if (kv.second.hasSource && kv.second.state == TextureAssetState::SourceMissing && kv.second.sourceHash == probeHash) {
-          kv.second.sourcePath = imgFiles[i];
-          kv.second.data.sourcePath = imgFiles[i];
-          EncodeTextureFile(kv.second.data, kv.second.texPath);
-          kv.second.state = TextureAssetState::Ready;
-          std::filesystem::path mp(kv.second.texPath);
-          relocated.push_back(mp.filename().string());
-          reconnected = true;
-          break;
-        }
-      }
-    }
-    if (reconnected) {
+    if (HashPendingForPath(imgFiles[i])) {
       continue;
     }
-    bool flying = false;
-    for (size_t k = 0; k < inflightTex.size(); ++k) {
-      if (inflightTex[k] == imgFiles[i]) {
-        flying = true;
-        break;
-      }
+    EnqueueHash(imgFiles[i], "", true);
+  }
+  for (auto it = pathToGuid.begin(); it != pathToGuid.end();) {
+    if (!std::filesystem::exists(it->first, ec) || ec) {
+      seenMeshTime.erase(it->first);
+      it = pathToGuid.erase(it);
+    } else {
+      ++it;
     }
-    if (flying) {
-      continue;
-    }
-    std::filesystem::path img(imgFiles[i]);
-    std::filesystem::path out = img;
-    out.replace_extension(".kztex");
-    bool outExists = std::filesystem::exists(out, ec) && !ec;
-    if (outExists) {
-      TextureAssetData probe;
-      if (DecodeTextureFile(out.string(), probe) && !probe.guid.empty()) {
-        continue;
-      }
-    }
-    EnqueueTexImport(imgFiles[i], out.string(), "");
-    inflightTex.push_back(imgFiles[i]);
   }
   for (auto it = texPathToGuid.begin(); it != texPathToGuid.end();) {
     if (!std::filesystem::exists(it->first, ec) || ec) {
       seenTexTime.erase(it->first);
       it = texPathToGuid.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  for (auto& kv : records) {
+    MeshRecord& record = kv.second;
+    if (!record.hasSource) {
+      record.state = MeshAssetState::NoSource;
+      continue;
+    }
+    int64_t ticks = 0;
+    if (!StatTime(record.sourcePath, ticks)) {
+      record.state = MeshAssetState::SourceMissing;
+      continue;
+    }
+    if (ticks != record.lastSeenSourceTime && !HashPendingForPath(record.sourcePath)) {
+      EnqueueHash(record.sourcePath, record.guid, false);
+    }
+  }
+  for (auto& kv : texRecords) {
+    TextureRecord& record = kv.second;
+    if (!record.hasSource) {
+      record.state = TextureAssetState::NoSource;
+      continue;
+    }
+    int64_t ticks = 0;
+    if (!StatTime(record.sourcePath, ticks)) {
+      record.state = TextureAssetState::SourceMissing;
+      continue;
+    }
+    if (ticks != record.lastSeenSourceTime && !HashPendingForPath(record.sourcePath)) {
+      EnqueueHash(record.sourcePath, record.guid, true);
+    }
+  }
+  for (auto it = failedDecode.begin(); it != failedDecode.end();) {
+    if (!std::filesystem::exists(it->first, ec) || ec) {
+      it = failedDecode.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  for (auto it = failedImport.begin(); it != failedImport.end();) {
+    if (!std::filesystem::exists(it->first, ec) || ec) {
+      it = failedImport.erase(it);
     } else {
       ++it;
     }
@@ -373,7 +281,12 @@ void ImportTexTask::ExecuteRange(enki::TaskSetPartition range, uint32_t threadnu
   result.taskId = taskId;
   result.sourcePath = sourcePath;
   result.texPath = texPath;
-  if (ImportTextureFile(sourcePath, keepGuid, result.data)) {
+  if (sourcePath.empty()) {
+    if (DecodeTextureFile(texPath, result.data) && !result.data.guid.empty()) {
+      result.ok = true;
+      result.sourcePath = texPath;
+    }
+  } else if (ImportTextureFile(sourcePath, keepGuid, result.data)) {
     progress = 60;
     if (EncodeTextureFile(result.data, texPath)) {
       result.ok = true;
@@ -384,6 +297,165 @@ void ImportTexTask::ExecuteRange(enki::TaskSetPartition range, uint32_t threadnu
     std::lock_guard<std::mutex> lock(*outMutex);
     outQueue->push_back(result);
   }
+}
+static bool StatTime(const std::string& path, int64_t& ticks) {
+  std::error_code ec;
+  std::filesystem::file_time_type ft = std::filesystem::last_write_time(path, ec);
+  if (ec) {
+    return false;
+  }
+  ticks = static_cast<int64_t>(ft.time_since_epoch().count());
+  return true;
+}
+HashTask::HashTask()
+  : taskId(0)
+  , progress(0)
+  , outMutex(nullptr)
+  , outQueue(nullptr) {
+  m_SetSize = 1;
+}
+void HashTask::ExecuteRange(enki::TaskSetPartition range, uint32_t threadnum) {
+  (void)range;
+  (void)threadnum;
+  progress = 50;
+  HashResult result;
+  result.ok = false;
+  result.taskId = taskId;
+  result.path = path;
+  result.guid = guid;
+  result.isTex = isTex;
+  result.hash = 0;
+  result.fileTime = 0;
+  int64_t ticks = 0;
+  uint64_t hash = 0;
+  if (StatTime(path, ticks) && Fnv1a64File(path, hash)) {
+    result.ok = true;
+    result.hash = hash;
+    result.fileTime = ticks;
+  }
+  progress = 100;
+  if (outMutex != nullptr && outQueue != nullptr) {
+    std::lock_guard<std::mutex> lock(*outMutex);
+    outQueue->push_back(result);
+  }
+}
+void AssetDatabase::EnqueueDecode(const std::string& compiledPath, bool isTex) {
+  EnsureJobs();
+  if (!jobsReady) {
+    return;
+  }
+  if (isTex) {
+    std::unique_ptr<ImportTexTask> task(new ImportTexTask());
+    task->sourcePath = "";
+    task->texPath = compiledPath;
+    task->keepGuid = "";
+    task->taskId = nextTaskId++;
+    task->outMutex = &completedTexMutex;
+    task->outQueue = &completedTex;
+    jobs.AddTask(task.get());
+    pendingTex.push_back(std::move(task));
+    inflightTex.push_back(compiledPath);
+  } else {
+    std::unique_ptr<ImportMeshTask> task(new ImportMeshTask());
+    task->sourcePath = "";
+    task->meshPath = compiledPath;
+    task->keepGuid = "";
+    task->taskId = nextTaskId++;
+    task->outMutex = &completedMutex;
+    task->outQueue = &completed;
+    jobs.AddTask(task.get());
+    pending.push_back(std::move(task));
+    inflight.push_back(compiledPath);
+  }
+}
+  inflight.push_back(compiledPath);
+}
+void AssetDatabase::EnqueueHash(const std::string& path, const std::string& guid, bool isTex) {
+  EnsureJobs();
+  if (!jobsReady) {
+    return;
+  }
+  std::unique_ptr<HashTask> task(new HashTask());
+  task->path = path;
+  task->guid = guid;
+  task->isTex = isTex;
+  task->taskId = nextTaskId++;
+  task->outMutex = &completedHashMutex;
+  task->outQueue = &completedHash;
+  jobs.AddTask(task.get());
+  pendingHash.push_back(std::move(task));
+}
+bool AssetDatabase::HashPendingForPath(const std::string& path) const {
+  for (size_t i = 0; i < pendingHash.size(); ++i) {
+    if (pendingHash[i]->path == path) {
+      return true;
+    }
+  }
+  return false;
+}
+bool AssetDatabase::DecodePendingFor(const std::string& path) const {
+  for (size_t i = 0; i < pending.size(); ++i) {
+    if (pending[i]->meshPath == path) {
+      return true;
+    }
+  }
+  for (size_t i = 0; i < pendingTex.size(); ++i) {
+    if (pendingTex[i]->texPath == path) {
+      return true;
+    }
+  }
+  return false;
+}
+bool AssetDatabase::SiblingUsable(const std::string& sourcePath, bool isTex) const {
+  std::filesystem::path sib(sourcePath);
+  sib.replace_extension(isTex ? ".kztex" : ".kzmesh");
+  std::string sibPath = sib.string();
+  int64_t ticks = 0;
+  if (!StatTime(sibPath, ticks)) {
+    return false;
+  }
+  auto fd = failedDecode.find(sibPath);
+  if (fd != failedDecode.end() && fd->second == ticks) {
+    return false;
+  }
+  if (DecodePendingFor(sibPath)) {
+    return true;
+  }
+  if (isTex ? (texPathToGuid.find(sibPath) != texPathToGuid.end()) : (pathToGuid.find(sibPath) != pathToGuid.end())) {
+    return true;
+  }
+  return true;
+}
+bool AssetDatabase::TryReconnectByHash(const std::string& path, uint64_t hash, int64_t fileTime) {
+  for (auto& kv : records) {
+    MeshRecord& record = kv.second;
+    if (!record.hasSource || record.state != MeshAssetState::SourceMissing || record.sourceHash != hash) {
+      continue;
+    }
+    record.sourcePath = path;
+    record.data.sourcePath = path;
+    record.lastSeenSourceTime = fileTime;
+    EncodeMeshFile(record.data, record.meshPath);
+    record.state = MeshAssetState::Ready;
+    std::filesystem::path mp(record.meshPath);
+    relocated.push_back(mp.filename().string());
+    return true;
+  }
+  for (auto& kv : texRecords) {
+    TextureRecord& record = kv.second;
+    if (!record.hasSource || record.state != TextureAssetState::SourceMissing || record.sourceHash != hash) {
+      continue;
+    }
+    record.sourcePath = path;
+    record.data.sourcePath = path;
+    record.lastSeenSourceTime = fileTime;
+    EncodeTextureFile(record.data, record.texPath);
+    record.state = TextureAssetState::Ready;
+    std::filesystem::path mp(record.texPath);
+    relocated.push_back(mp.filename().string());
+    return true;
+  }
+  return false;
 }
 void AssetDatabase::EnqueueTexImport(const std::string& sourcePath, const std::string& texPath, const std::string& keepGuid) {
   EnsureJobs();
@@ -400,29 +472,6 @@ void AssetDatabase::EnqueueTexImport(const std::string& sourcePath, const std::s
   jobs.AddTask(task.get());
   pendingTex.push_back(std::move(task));
 }
-void AssetDatabase::RefreshTexRecordState(TextureRecord& record) {
-  if (!record.hasSource) {
-    record.state = TextureAssetState::NoSource;
-    return;
-  }
-  std::error_code ec;
-  std::filesystem::file_time_type ft = std::filesystem::last_write_time(record.sourcePath, ec);
-  if (ec) {
-    record.state = TextureAssetState::SourceMissing;
-    return;
-  }
-  int64_t ticks = static_cast<int64_t>(ft.time_since_epoch().count());
-  if (ticks == record.lastSeenSourceTime) {
-    return;
-  }
-  uint64_t hash = 0;
-  if (!Fnv1a64File(record.sourcePath, hash)) {
-    record.state = TextureAssetState::SourceMissing;
-    return;
-  }
-  record.lastSeenSourceTime = ticks;
-  record.state = (hash == record.sourceHash) ? TextureAssetState::Ready : TextureAssetState::Outdated;
-}
 void AssetDatabase::UpsertTexResult(const ImportTexResult& result) {
   if (!result.ok || result.data.guid.empty()) {
     return;
@@ -436,8 +485,7 @@ void AssetDatabase::UpsertTexResult(const ImportTexResult& result) {
     existing->second.hasSource = result.data.hasSource;
     existing->second.data = result.data;
     existing->second.loaded = true;
-    existing->second.lastSeenSourceTime = 0;
-    RefreshTexRecordState(existing->second);
+    InitFreshTexState(existing->second);
   } else {
     TextureRecord record;
     record.guid = result.data.guid;
@@ -447,13 +495,16 @@ void AssetDatabase::UpsertTexResult(const ImportTexResult& result) {
     record.hasSource = result.data.hasSource;
     record.data = result.data;
     record.loaded = true;
-    record.lastSeenSourceTime = 0;
     record.gpu = 0;
     record.residentLevels = 0;
     record.selectedLevels = 0;
-    RefreshTexRecordState(record);
+    InitFreshTexState(record);
     texRecords[record.guid] = record;
   }
+  int64_t mtime = 0;
+  StatTime(result.texPath, mtime);
+  texPathToGuid[result.texPath] = result.data.guid;
+  seenTexTime[result.texPath] = mtime;
 }
 size_t AssetDatabase::DrainCompleted() {
   std::vector<ImportResult> results;
@@ -462,7 +513,20 @@ size_t AssetDatabase::DrainCompleted() {
     results.swap(completed);
   }
   for (size_t i = 0; i < results.size(); ++i) {
-    UpsertResult(results[i]);
+    if (!results[i].ok) {
+      int64_t ticks = 0;
+      if (StatTime(results[i].meshPath, ticks)) {
+        failedDecode[results[i].meshPath] = ticks;
+      }
+      if (results[i].sourcePath != results[i].meshPath) {
+        int64_t sticks = 0;
+        if (StatTime(results[i].sourcePath, sticks)) {
+          failedImport[results[i].sourcePath] = sticks;
+        }
+      }
+    } else {
+      UpsertResult(results[i]);
+    }
     for (size_t p = 0; p < pending.size(); ++p) {
       if (pending[p]->taskId == results[i].taskId) {
         pending.erase(pending.begin() + p);
@@ -482,7 +546,20 @@ size_t AssetDatabase::DrainCompleted() {
     texResults.swap(completedTex);
   }
   for (size_t i = 0; i < texResults.size(); ++i) {
-    UpsertTexResult(texResults[i]);
+    if (!texResults[i].ok) {
+      int64_t ticks = 0;
+      if (StatTime(texResults[i].texPath, ticks)) {
+        failedDecode[texResults[i].texPath] = ticks;
+      }
+      if (texResults[i].sourcePath != texResults[i].texPath) {
+        int64_t sticks = 0;
+        if (StatTime(texResults[i].sourcePath, sticks)) {
+          failedImport[texResults[i].sourcePath] = sticks;
+        }
+      }
+    } else {
+      UpsertTexResult(texResults[i]);
+    }
     for (size_t p = 0; p < pendingTex.size(); ++p) {
       if (pendingTex[p]->taskId == texResults[i].taskId) {
         pendingTex.erase(pendingTex.begin() + p);
@@ -496,7 +573,81 @@ size_t AssetDatabase::DrainCompleted() {
       }
     }
   }
-  return results.size() + texResults.size();
+  std::vector<HashResult> hashResults;
+  {
+    std::lock_guard<std::mutex> lock(completedHashMutex);
+    hashResults.swap(completedHash);
+  }
+  for (size_t i = 0; i < hashResults.size(); ++i) {
+    const HashResult& hr = hashResults[i];
+    for (size_t p = 0; p < pendingHash.size(); ++p) {
+      if (pendingHash[p]->taskId == hr.taskId) {
+        pendingHash.erase(pendingHash.begin() + p);
+        break;
+      }
+    }
+    if (!hr.ok) {
+      continue;
+    }
+    if (!hr.guid.empty()) {
+      if (!hr.isTex) {
+        MeshRecord* r = FindByGuid(hr.guid);
+        if (r != nullptr && r->sourcePath == hr.path) {
+          r->state = (r->sourceHash == hr.hash) ? MeshAssetState::Ready : MeshAssetState::Outdated;
+          r->lastSeenSourceTime = hr.fileTime;
+        }
+      } else {
+        auto it = texRecords.find(hr.guid);
+        if (it != texRecords.end() && it->second.sourcePath == hr.path) {
+          it->second.state = (it->second.sourceHash == hr.hash) ? TextureAssetState::Ready : TextureAssetState::Outdated;
+          it->second.lastSeenSourceTime = hr.fileTime;
+        }
+      }
+      continue;
+    }
+    if (TryReconnectByHash(hr.path, hr.hash, hr.fileTime)) {
+      continue;
+    }
+    bool nowKnown = false;
+    if (hr.isTex) {
+      for (auto& kv : texRecords) {
+        if (kv.second.hasSource && kv.second.sourcePath == hr.path) {
+          nowKnown = true;
+          break;
+        }
+      }
+    } else {
+      for (auto& kv : records) {
+        if (kv.second.hasSource && kv.second.sourcePath == hr.path) {
+          nowKnown = true;
+          break;
+        }
+      }
+    }
+    if (nowKnown) {
+      continue;
+    }
+    std::filesystem::path sib(hr.path);
+    sib.replace_extension(hr.isTex ? ".kztex" : ".kzmesh");
+    if (SiblingUsable(sib.string(), hr.isTex)) {
+      continue;
+    }
+    int64_t smtime = 0;
+    if (StatTime(hr.path, smtime)) {
+      auto fi = failedImport.find(hr.path);
+      if (fi != failedImport.end() && fi->second == smtime) {
+        continue;
+      }
+    }
+    if (hr.isTex) {
+      EnqueueTexImport(hr.path, sib.string(), "");
+      inflightTex.push_back(hr.path);
+    } else {
+      EnqueueImport(hr.path, sib.string(), "");
+      inflight.push_back(hr.path);
+    }
+  }
+  return results.size() + texResults.size() + hashResults.size();
 }
 size_t AssetDatabase::PendingImports() const {
   return pending.size() + pendingTex.size();
@@ -519,6 +670,14 @@ std::vector<std::pair<std::string, int>> AssetDatabase::ImportingNow() const {
     }
     out.push_back(std::make_pair(name, pendingTex[i]->progress.load()));
   }
+  for (size_t i = 0; i < pendingHash.size(); ++i) {
+    std::string name = pendingHash[i]->path;
+    size_t slash = name.find_last_of("/\\");
+    if (slash != std::string::npos) {
+      name = name.substr(slash + 1);
+    }
+    out.push_back(std::make_pair(name, pendingHash[i]->progress.load()));
+  }
   return out;
 }
 void AssetDatabase::DrainBlocking() {
@@ -531,6 +690,34 @@ void AssetDatabase::DrainBlocking() {
   }
   pendingTex.clear();
   DrainCompleted();
+}
+void AssetDatabase::InitFreshMeshState(MeshRecord& record) {
+  record.lastSeenSourceTime = 0;
+  if (record.hasSource) {
+    int64_t ticks = 0;
+    if (StatTime(record.sourcePath, ticks)) {
+      record.lastSeenSourceTime = ticks;
+      record.state = MeshAssetState::Ready;
+      return;
+    }
+    record.state = MeshAssetState::SourceMissing;
+    return;
+  }
+  record.state = MeshAssetState::NoSource;
+}
+void AssetDatabase::InitFreshTexState(TextureRecord& record) {
+  record.lastSeenSourceTime = 0;
+  if (record.hasSource) {
+    int64_t ticks = 0;
+    if (StatTime(record.sourcePath, ticks)) {
+      record.lastSeenSourceTime = ticks;
+      record.state = TextureAssetState::Ready;
+      return;
+    }
+    record.state = TextureAssetState::SourceMissing;
+    return;
+  }
+  record.state = TextureAssetState::NoSource;
 }
 void AssetDatabase::UpsertResult(const ImportResult& result) {
   if (!result.ok || result.data.guid.empty()) {
@@ -545,8 +732,7 @@ void AssetDatabase::UpsertResult(const ImportResult& result) {
     existing->hasSource = result.data.hasSource;
     existing->data = result.data;
     existing->loaded = true;
-    existing->lastSeenSourceTime = 0;
-    RefreshRecordState(*existing);
+    InitFreshMeshState(*existing);
   } else {
     MeshRecord record;
     record.guid = result.data.guid;
@@ -556,14 +742,17 @@ void AssetDatabase::UpsertResult(const ImportResult& result) {
     record.hasSource = result.data.hasSource;
     record.data = result.data;
     record.loaded = true;
-    record.lastSeenSourceTime = 0;
     record.gpuVB = 0;
     record.gpuIB = 0;
     record.gpuCount = 0;
     record.gpuReady = false;
-    RefreshRecordState(record);
+    InitFreshMeshState(record);
     records[record.guid] = record;
   }
+  int64_t mtime = 0;
+  StatTime(result.meshPath, mtime);
+  pathToGuid[result.meshPath] = result.data.guid;
+  seenMeshTime[result.meshPath] = mtime;
 }
 const MeshRecord* AssetDatabase::GetByGuid(const std::string& guid) const {
   auto it = records.find(guid);
@@ -623,8 +812,8 @@ size_t AssetDatabase::RelocateMissing() {
   if (assetsDir.empty()) {
     return 0;
   }
-  std::vector<std::string> glbFiles;
   std::error_code ec;
+  size_t queued = 0;
   for (std::filesystem::recursive_directory_iterator it(assetsDir, ec), end; it != end && !ec; it.increment(ec)) {
     if (!it->is_regular_file(ec) || ec) {
       continue;
@@ -633,65 +822,33 @@ size_t AssetDatabase::RelocateMissing() {
     for (size_t i = 0; i < ext.size(); ++i) {
       ext[i] = static_cast<char>(tolower(ext[i]));
     }
-    if (ext == ".glb" || ext == ".gltf") {
-      glbFiles.push_back(it->path().string());
-    }
-  }
-  size_t fixed = 0;
-  for (auto& kv : records) {
-    MeshRecord& record = kv.second;
-    if (!record.hasSource || record.state != MeshAssetState::SourceMissing) {
+    bool isTex = IsImageExt(ext);
+    if (ext != ".glb" && ext != ".gltf" && !isTex) {
       continue;
     }
-    for (size_t i = 0; i < glbFiles.size(); ++i) {
-      uint64_t hash = 0;
-      if (!Fnv1a64File(glbFiles[i], hash) || hash != record.sourceHash) {
-        continue;
+    std::string file = it->path().string();
+    bool referenced = false;
+    for (auto& kv : records) {
+      if (kv.second.hasSource && kv.second.sourcePath == file) {
+        referenced = true;
+        break;
       }
-      record.sourcePath = glbFiles[i];
-      record.data.sourcePath = glbFiles[i];
-      EncodeMeshFile(record.data, record.meshPath);
-      record.state = MeshAssetState::Ready;
-      std::filesystem::path mp(record.meshPath);
-      relocated.push_back(mp.filename().string());
-      ++fixed;
-      break;
     }
-  }
-  std::vector<std::string> imgFiles;
-  for (std::filesystem::recursive_directory_iterator it(assetsDir, ec), end; it != end && !ec; it.increment(ec)) {
-    if (!it->is_regular_file(ec) || ec) {
-      continue;
-    }
-    std::string ext = it->path().extension().string();
-    for (size_t i = 0; i < ext.size(); ++i) {
-      ext[i] = static_cast<char>(tolower(ext[i]));
-    }
-    if (IsImageExt(ext)) {
-      imgFiles.push_back(it->path().string());
-    }
-  }
-  for (auto& kv : texRecords) {
-    TextureRecord& record = kv.second;
-    if (!record.hasSource || record.state != TextureAssetState::SourceMissing) {
-      continue;
-    }
-    for (size_t i = 0; i < imgFiles.size(); ++i) {
-      uint64_t hash = 0;
-      if (!Fnv1a64File(imgFiles[i], hash) || hash != record.sourceHash) {
-        continue;
+    if (!referenced) {
+      for (auto& kv : texRecords) {
+        if (kv.second.hasSource && kv.second.sourcePath == file) {
+          referenced = true;
+          break;
+        }
       }
-      record.sourcePath = imgFiles[i];
-      record.data.sourcePath = imgFiles[i];
-      EncodeTextureFile(record.data, record.texPath);
-      record.state = TextureAssetState::Ready;
-      std::filesystem::path mp(record.texPath);
-      relocated.push_back(mp.filename().string());
-      ++fixed;
-      break;
     }
+    if (referenced || HashPendingForPath(file)) {
+      continue;
+    }
+    EnqueueHash(file, "", isTex);
+    ++queued;
   }
-  return fixed;
+  return queued;
 }
 std::vector<std::string> AssetDatabase::TakeRelocated() {
   std::vector<std::string> out = relocated;
@@ -1039,7 +1196,6 @@ bool AssetDatabase::SetSourcePath(const std::string& guid, const std::string& ne
   record->data.hasSource = true;
   record->lastSeenSourceTime = 0;
   EncodeMeshFile(record->data, record->meshPath);
-  RefreshRecordState(*record);
   return true;
 }
 bool AssetDatabase::SetTexSourcePath(const std::string& guid, const std::string& newSourcePath) {
@@ -1057,7 +1213,6 @@ bool AssetDatabase::SetTexSourcePath(const std::string& guid, const std::string&
   it->second.data.hasSource = true;
   it->second.lastSeenSourceTime = 0;
   EncodeTextureFile(it->second.data, it->second.texPath);
-  RefreshTexRecordState(it->second);
   return true;
 }
 }

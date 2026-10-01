@@ -106,7 +106,26 @@ struct TexUpload {
   std::string guid;
   int mip;
 };
-class AssetDatabase {
+struct HashResult {
+  bool ok;
+  size_t taskId;
+  std::string path;
+  std::string guid;
+  bool isTex;
+  uint64_t hash;
+  int64_t fileTime;
+};
+struct HashTask : public enki::ITaskSet {
+  HashTask();
+  void ExecuteRange(enki::TaskSetPartition range, uint32_t threadnum) override;
+  std::string path;
+  std::string guid;
+  bool isTex;
+  size_t taskId;
+  std::atomic<int> progress;
+  std::mutex* outMutex;
+  std::vector<HashResult>* outQueue;
+};class AssetDatabase {
 public:
   AssetDatabase();
   void SetAssetsDir(const std::string& dir);
@@ -151,8 +170,13 @@ private:
   std::vector<std::string> inflight;
   std::vector<std::unique_ptr<ImportTexTask>> pendingTex;
   std::vector<std::string> inflightTex;
+  std::vector<std::unique_ptr<HashTask>> pendingHash;
   std::mutex completedTexMutex;
   std::vector<ImportTexResult> completedTex;
+  std::mutex completedHashMutex;
+  std::vector<HashResult> completedHash;
+  std::map<std::string, int64_t> failedDecode;
+  std::map<std::string, int64_t> failedImport;
   std::map<std::string, TextureRecord> texRecords;
   std::map<std::string, int64_t> seenTexTime;
   std::map<std::string, std::string> texPathToGuid;
@@ -165,10 +189,21 @@ private:
   void EnsureJobs();
   void EnqueueImport(const std::string& sourcePath, const std::string& meshPath, const std::string& keepGuid);
   void EnqueueTexImport(const std::string& sourcePath, const std::string& texPath, const std::string& keepGuid);
+  void EnqueueDecode(const std::string& compiledPath, bool isTex);
+  void EnqueueHash(const std::string& path, const std::string& guid, bool isTex);
+  bool HashPendingForPath(const std::string& path) const;
+  bool DecodePendingFor(const std::string& path) const;
+  bool SiblingUsable(const std::string& sourcePath, bool isTex) const;
+  bool TryReconnectByHash(const std::string& path, uint64_t hash, int64_t fileTime);
   void UpsertResult(const ImportResult& result);
   void UpsertTexResult(const ImportTexResult& result);
+  void EnqueueHash(const std::string& path, const std::string& guid, bool isTex);
+  bool HashPendingFor(const std::string& guid, bool isTex) const;
+  bool DecodePendingFor(const std::string& path) const;
+  bool SiblingUsable(const std::string& sourcePath, bool isTex) const;
+  bool TryReconnectByHash(const std::string& path, uint64_t hash, int64_t fileTime);
   MeshRecord* FindByGuid(const std::string& guid);
-  void RefreshRecordState(MeshRecord& record);
-  void RefreshTexRecordState(TextureRecord& record);
+  void InitFreshMeshState(MeshRecord& record);
+  void InitFreshTexState(TextureRecord& record);
 };
 }

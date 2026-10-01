@@ -145,8 +145,12 @@ void EditorApp::PumpAssets() {
   if (scanTimer >= 2.0) {
     scanTimer = 0.0;
     assets.Scan();
-    if (assets.RelocateMissing() > 0) {
-      std::vector<std::string> names = assets.TakeRelocated();
+    assets.RelocateMissing();
+  }
+  assets.DrainCompleted();
+  {
+    std::vector<std::string> names = assets.TakeRelocated();
+    if (!names.empty()) {
       std::string msg = "Source relocated: ";
       for (size_t i = 0; i < names.size(); ++i) {
         if (i > 0) {
@@ -157,7 +161,6 @@ void EditorApp::PumpAssets() {
       Announce(LogLevel::Info, msg);
     }
   }
-  assets.DrainCompleted();
   float cpx = 0.0f;
   float cpy = 0.0f;
   float cpz = 0.0f;
