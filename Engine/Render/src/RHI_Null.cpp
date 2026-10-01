@@ -81,15 +81,34 @@ public:
     d = discarded;
   }
   RHIBuffer CreateBuffer(uint64_t size, uint32_t stride, bool isIndex, const void* initialData) override {
+    RHIBuffer id = CreateBufferEmpty(size, stride, isIndex);
+    if (id != 0 && initialData != nullptr) {
+      UpdateBufferRange(id, 0, initialData, static_cast<size_t>(size));
+    }
+    return id;
+  }
+  RHIBuffer CreateBufferEmpty(uint64_t size, uint32_t stride, bool isIndex) override {
     (void)stride;
     (void)isIndex;
-    (void)initialData;
     if (size == 0) {
       return 0;
     }
     uint64_t id = nextId++;
-    buffers[id] = size;
+    NullBuffer b;
+    b.bytes.assign(static_cast<size_t>(size), 0);
+    buffers[id] = b;
     return id;
+  }
+  bool UpdateBufferRange(RHIBuffer buf, uint64_t offset, const void* data, size_t bytes) override {
+    auto it = buffers.find(buf);
+    if (it == buffers.end() || data == nullptr || bytes == 0) {
+      return false;
+    }
+    if (offset + bytes > it->second.bytes.size()) {
+      return false;
+    }
+    std::memcpy(it->second.bytes.data() + static_cast<size_t>(offset), data, bytes);
+    return true;
   }
   void DestroyBuffer(RHIBuffer buf) override {
     buffers.erase(buf);
@@ -337,7 +356,10 @@ private:
   uint64_t nextId;
   uint64_t total;
   uint64_t discarded;
-  std::unordered_map<uint64_t, uint64_t> buffers;
+  struct NullBuffer {
+    std::vector<unsigned char> bytes;
+  };
+  std::unordered_map<uint64_t, NullBuffer> buffers;
   std::unordered_map<uint64_t, std::vector<unsigned char>> cbuffers;
   std::unordered_map<uint64_t, int> targets;
   std::unordered_map<uint64_t, int> shaders;

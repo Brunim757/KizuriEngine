@@ -288,11 +288,51 @@ public:
     uint64_t id = nextId++;
     buffers[id] = buf;
     strides[id] = stride;
+    sizes[id] = size;
     return id;
+  }
+  RHIBuffer CreateBufferEmpty(uint64_t size, uint32_t stride, bool isIndex) override {
+    if (size == 0 || size > 256 * 1024 * 1024) {
+      return 0;
+    }
+    D3D11_BUFFER_DESC bd;
+    bd.ByteWidth = static_cast<UINT>(size);
+    bd.Usage = D3D11_USAGE_DYNAMIC;
+    bd.BindFlags = isIndex ? D3D11_BIND_INDEX_BUFFER : D3D11_BIND_VERTEX_BUFFER;
+    bd.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    bd.MiscFlags = 0;
+    bd.StructureByteStride = 0;
+    ComPtr<ID3D11Buffer> buf;
+    if (FAILED(device->CreateBuffer(&bd, nullptr, buf.GetAddressOf()))) {
+      return 0;
+    }
+    uint64_t id = nextId++;
+    buffers[id] = buf;
+    strides[id] = stride;
+    sizes[id] = size;
+    return id;
+  }
+  bool UpdateBufferRange(RHIBuffer buf, uint64_t offset, const void* data, size_t bytes) override {
+    auto it = buffers.find(buf);
+    if (it == buffers.end() || data == nullptr || bytes == 0) {
+      return false;
+    }
+    auto sz = sizes.find(buf);
+    if (sz == sizes.end() || offset + bytes > sz->second) {
+      return false;
+    }
+    D3D11_MAPPED_SUBRESOURCE mapped;
+    if (FAILED(context->Map(it->second.Get(), 0, D3D11_MAP_WRITE_NO_OVERWRITE, 0, &mapped))) {
+      return false;
+    }
+    std::memcpy(static_cast<unsigned char*>(mapped.pData) + static_cast<size_t>(offset), data, bytes);
+    context->Unmap(it->second.Get(), 0);
+    return true;
   }
   void DestroyBuffer(RHIBuffer buf) override {
     buffers.erase(buf);
     strides.erase(buf);
+    sizes.erase(buf);
   }
   void SetVertexBuffer(RHIBuffer buf, uint32_t offset) override {
     if (curVB == buf && curVBOffset == offset) {
@@ -907,6 +947,7 @@ private:
   uint64_t backId = 0;
   std::unordered_map<uint64_t, ComPtr<ID3D11Buffer>> buffers;
   std::unordered_map<uint64_t, uint32_t> strides;
+  std::unordered_map<uint64_t, uint64_t> sizes;
   std::unordered_map<uint64_t, ComPtr<ID3D11Buffer>> cbuffers;
   std::unordered_map<uint64_t, ComPtr<ID3D11VertexShader>> vsMap;
   std::unordered_map<uint64_t, ComPtr<ID3DBlob>> vsBlobs;

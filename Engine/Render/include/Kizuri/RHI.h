@@ -80,6 +80,8 @@ public:
   virtual void* GetNativeContext() const = 0;
   virtual void GetCacheStats(uint64_t& total, uint64_t& discarded) const = 0;
   virtual RHIBuffer CreateBuffer(uint64_t size, uint32_t stride, bool isIndex, const void* initialData) = 0;
+  virtual RHIBuffer CreateBufferEmpty(uint64_t size, uint32_t stride, bool isIndex) = 0;
+  virtual bool UpdateBufferRange(RHIBuffer buf, uint64_t offset, const void* data, size_t bytes) = 0;
   virtual void DestroyBuffer(RHIBuffer buf) = 0;
   virtual void SetVertexBuffer(RHIBuffer buf, uint32_t offset) = 0;
   virtual void SetIndexBuffer(RHIBuffer buf) = 0;

@@ -31,6 +31,9 @@ struct MeshRecord {
   RHIBuffer gpuIB;
   uint32_t gpuCount;
   bool gpuReady;
+  std::vector<float> stageInterleaved;
+  size_t stageVBDone;
+  size_t stageIBDone;
 };
 struct RefUse {
   std::string userLabel;

@@ -906,6 +906,9 @@ void AssetDatabase::DropMeshGpu(MeshRecord& record) {
   record.gpuIB = 0;
   record.gpuCount = 0;
   record.gpuReady = false;
+  record.stageInterleaved.clear();
+  record.stageVBDone = 0;
+  record.stageIBDone = 0;
 }
 void AssetDatabase::DropTexGpu(TextureRecord& record) {
   if (gpuRhi != nullptr && record.gpu != 0) {
@@ -922,41 +925,76 @@ bool AssetDatabase::EnsureMeshGpu(const std::string& guid, size_t maxBytes) {
   if (record->gpuReady) {
     return true;
   }
+  if (maxBytes == 0) {
+    return false;
+  }
   size_t vertexCount = record->data.positions.size() / 3;
   if (vertexCount == 0 || record->data.indices.empty()) {
     return false;
   }
   size_t vbBytes = vertexCount * 32;
   size_t ibBytes = record->data.indices.size() * 4;
-  if (vbBytes + ibBytes > maxBytes) {
-    return false;
+  if (record->gpuVB == 0) {
+    record->stageInterleaved.clear();
+    record->stageInterleaved.reserve(vertexCount * 8);
+    for (size_t i = 0; i < vertexCount; ++i) {
+      record->stageInterleaved.push_back(record->data.positions[i * 3 + 0]);
+      record->stageInterleaved.push_back(record->data.positions[i * 3 + 1]);
+      record->stageInterleaved.push_back(record->data.positions[i * 3 + 2]);
+      record->stageInterleaved.push_back(record->data.normals[i * 3 + 0]);
+      record->stageInterleaved.push_back(record->data.normals[i * 3 + 1]);
+      record->stageInterleaved.push_back(record->data.normals[i * 3 + 2]);
+      record->stageInterleaved.push_back(record->data.uvs[i * 2 + 0]);
+      record->stageInterleaved.push_back(record->data.uvs[i * 2 + 1]);
+    }
+    RHIBuffer vb = gpuRhi->CreateBufferEmpty(static_cast<uint64_t>(vbBytes), 32, false);
+    if (vb == 0) {
+      record->stageInterleaved.clear();
+      return false;
+    }
+    RHIBuffer ib = gpuRhi->CreateBufferEmpty(static_cast<uint64_t>(ibBytes), 4, true);
+    if (ib == 0) {
+      gpuRhi->DestroyBuffer(vb);
+      record->stageInterleaved.clear();
+      return false;
+    }
+    record->gpuVB = vb;
+    record->gpuIB = ib;
+    record->stageVBDone = 0;
+    record->stageIBDone = 0;
   }
-  std::vector<float> interleaved;
-  interleaved.reserve(vertexCount * 8);
-  for (size_t i = 0; i < vertexCount; ++i) {
-    interleaved.push_back(record->data.positions[i * 3 + 0]);
-    interleaved.push_back(record->data.positions[i * 3 + 1]);
-    interleaved.push_back(record->data.positions[i * 3 + 2]);
-    interleaved.push_back(record->data.normals[i * 3 + 0]);
-    interleaved.push_back(record->data.normals[i * 3 + 1]);
-    interleaved.push_back(record->data.normals[i * 3 + 2]);
-    interleaved.push_back(record->data.uvs[i * 2 + 0]);
-    interleaved.push_back(record->data.uvs[i * 2 + 1]);
+  size_t budget = maxBytes;
+  const unsigned char* vbytes = reinterpret_cast<const unsigned char*>(record->stageInterleaved.data());
+  while (budget > 0 && record->stageVBDone < vbBytes) {
+    size_t chunk = vbBytes - record->stageVBDone;
+    if (chunk > budget) {
+      chunk = budget;
+    }
+    if (!gpuRhi->UpdateBufferRange(record->gpuVB, record->stageVBDone, vbytes + record->stageVBDone, chunk)) {
+      return false;
+    }
+    record->stageVBDone += chunk;
+    budget -= chunk;
   }
-  RHIBuffer vb = gpuRhi->CreateBuffer(static_cast<uint64_t>(vbBytes), 32, false, interleaved.data());
-  if (vb == 0) {
-    return false;
+  const unsigned char* ibytes = reinterpret_cast<const unsigned char*>(record->data.indices.data());
+  while (budget > 0 && record->stageIBDone < ibBytes) {
+    size_t chunk = ibBytes - record->stageIBDone;
+    if (chunk > budget) {
+      chunk = budget;
+    }
+    if (!gpuRhi->UpdateBufferRange(record->gpuIB, record->stageIBDone, ibytes + record->stageIBDone, chunk)) {
+      return false;
+    }
+    record->stageIBDone += chunk;
+    budget -= chunk;
   }
-  RHIBuffer ib = gpuRhi->CreateBuffer(static_cast<uint64_t>(ibBytes), 4, true, record->data.indices.data());
-  if (ib == 0) {
-    gpuRhi->DestroyBuffer(vb);
-    return false;
+  if (record->stageVBDone == vbBytes && record->stageIBDone == ibBytes) {
+    record->gpuCount = static_cast<uint32_t>(record->data.indices.size());
+    record->gpuReady = true;
+    record->stageInterleaved.clear();
+    return true;
   }
-  record->gpuVB = vb;
-  record->gpuIB = ib;
-  record->gpuCount = static_cast<uint32_t>(record->data.indices.size());
-  record->gpuReady = true;
-  return true;
+  return false;
 }
 bool AssetDatabase::SetSourcePath(const std::string& guid, const std::string& newSourcePath) {
   MeshRecord* record = FindByGuid(guid);

@@ -2288,6 +2288,155 @@ bool TestDbTextures() {
   fs::remove(fs::temp_directory_path() / "kzdbtex_backup.bmp", ec);
   return true;
 }
+bool TestRHIBuffers() {
+  Kizuri::IRHI* rhi = Kizuri::CreateRHI(Kizuri::RHI_API::Null);
+  if (rhi == nullptr) {
+    return false;
+  }
+  Kizuri::RHIDesc desc;
+  desc.windowHandle = nullptr;
+  desc.width = 64;
+  desc.height = 64;
+  desc.vsync = false;
+  if (!rhi->Initialize(desc)) {
+    Kizuri::DestroyRHI(rhi);
+    return false;
+  }
+  if (rhi->CreateBufferEmpty(0, 16, false) != 0) {
+    Kizuri::DestroyRHI(rhi);
+    return false;
+  }
+  Kizuri::RHIBuffer buf = rhi->CreateBufferEmpty(1024, 16, false);
+  if (buf == 0) {
+    Kizuri::DestroyRHI(rhi);
+    return false;
+  }
+  std::vector<unsigned char> chunk(256, 0xAB);
+  if (!rhi->UpdateBufferRange(buf, 0, chunk.data(), chunk.size())) {
+    Kizuri::DestroyRHI(rhi);
+    return false;
+  }
+  if (rhi->UpdateBufferRange(buf, 900, chunk.data(), chunk.size())) {
+    Kizuri::DestroyRHI(rhi);
+    return false;
+  }
+  if (rhi->UpdateBufferRange(buf, 0, nullptr, 10)) {
+    Kizuri::DestroyRHI(rhi);
+    return false;
+  }
+  if (!rhi->UpdateBufferRange(buf, 768, chunk.data(), 256)) {
+    Kizuri::DestroyRHI(rhi);
+    return false;
+  }
+  rhi->DestroyBuffer(buf);
+  rhi->Shutdown();
+  Kizuri::DestroyRHI(rhi);
+  return true;
+}
+bool TestMeshStaging() {
+  namespace fs = std::filesystem;
+  fs::path dir = fs::temp_directory_path() / "kzstaging_test";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  Kizuri::MeshAssetData big;
+  big.guid = Kizuri::GenerateGuidString();
+  const size_t nv = 20000;
+  for (size_t i = 0; i < nv; ++i) {
+    big.positions.push_back(static_cast<float>(i) * 0.01f);
+    big.positions.push_back(0.0f);
+    big.positions.push_back(0.0f);
+    big.normals.push_back(0.0f);
+    big.normals.push_back(1.0f);
+    big.normals.push_back(0.0f);
+    big.uvs.push_back(0.0f);
+    big.uvs.push_back(0.0f);
+  }
+  for (uint32_t i = 0; i + 2 < nv; i += 3) {
+    big.indices.push_back(i);
+    big.indices.push_back(i + 1);
+    big.indices.push_back(i + 2);
+  }
+  Kizuri::MeshPartData part;
+  part.indexOffset = 0;
+  part.indexCount = static_cast<uint32_t>(big.indices.size());
+  part.material = 0;
+  big.parts.push_back(part);
+  big.aabbMin[0] = 0.0f;
+  big.aabbMin[1] = 0.0f;
+  big.aabbMin[2] = 0.0f;
+  big.aabbMax[0] = 200.0f;
+  big.aabbMax[1] = 0.0f;
+  big.aabbMax[2] = 0.0f;
+  big.hasSource = false;
+  if (!Kizuri::EncodeMeshFile(big, (dir / "big.kzmesh").string())) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  Kizuri::MeshAssetData small;
+  small.guid = Kizuri::GenerateGuidString();
+  small.positions = { 0, 0, 0, 1, 0, 0, 0, 1, 0 };
+  small.normals = { 0, 0, 1, 0, 0, 1, 0, 0, 1 };
+  small.uvs = { 0, 0, 1, 0, 0, 1 };
+  small.indices = { 0, 1, 2 };
+  part.indexCount = 3;
+  small.parts.push_back(part);
+  small.aabbMin[0] = 0.0f;
+  small.aabbMin[1] = 0.0f;
+  small.aabbMin[2] = 0.0f;
+  small.aabbMax[0] = 1.0f;
+  small.aabbMax[1] = 1.0f;
+  small.aabbMax[2] = 0.0f;
+  small.hasSource = false;
+  if (!Kizuri::EncodeMeshFile(small, (dir / "small.kzmesh").string())) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  Kizuri::AssetDatabase db;
+  db.SetAssetsDir(dir.string());
+  db.Scan();
+  db.DrainBlocking();
+  Kizuri::IRHI* rhi = Kizuri::CreateRHI(Kizuri::RHI_API::Null);
+  Kizuri::RHIDesc desc;
+  desc.windowHandle = nullptr;
+  desc.width = 64;
+  desc.height = 64;
+  desc.vsync = false;
+  rhi->Initialize(desc);
+  db.SetGpuRHI(rhi);
+  if (db.EnsureMeshGpu(big.guid, 0)) {
+    Kizuri::DestroyRHI(rhi);
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (!db.EnsureMeshGpu(small.guid, 1048576)) {
+    Kizuri::DestroyRHI(rhi);
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  int iters = 0;
+  while (!db.EnsureMeshGpu(big.guid, 4096)) {
+    if (++iters > 10000) {
+      Kizuri::DestroyRHI(rhi);
+      fs::remove_all(dir, ec);
+      return false;
+    }
+  }
+  if (iters < 2) {
+    Kizuri::DestroyRHI(rhi);
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  const Kizuri::MeshRecord* rec = db.GetByGuid(big.guid);
+  if (rec == nullptr || !rec->gpuReady || rec->gpuCount != big.indices.size() || rec->gpuVB == 0 || rec->gpuIB == 0) {
+    Kizuri::DestroyRHI(rhi);
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  Kizuri::DestroyRHI(rhi);
+  fs::remove_all(dir, ec);
+  return true;
+}
 }
 int main() {
   std::setvbuf(stdout, nullptr, _IONBF, 0);
@@ -2352,6 +2501,8 @@ int main() {
   failures += Check("RHITextures", TestRHITextures());
   failures += Check("TexStreaming", TestTexStreaming());
   failures += Check("GltfTextured", TestGltfTextured());
+  failures += Check("RHIBuffers", TestRHIBuffers());
+  failures += Check("MeshStaging", TestMeshStaging());
   failures += Check("SetMeshGuid", TestSetMeshGuid());
   failures += Check("DbTextures", TestDbTextures());
   if (failures == 0) {
