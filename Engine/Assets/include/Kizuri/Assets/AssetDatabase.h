@@ -144,7 +144,6 @@ public:
   size_t RelocateMissing();
   std::vector<std::string> TakeRelocated();
   std::vector<std::string> TakeImportErrors();
-  std::vector<std::string> TakeImportErrors();
   bool RenameAssetFile(const std::string& guid, const std::string& newFileName);
   bool SetSourcePath(const std::string& guid, const std::string& newSourcePath);
   bool SetTexSourcePath(const std::string& guid, const std::string& newSourcePath);
