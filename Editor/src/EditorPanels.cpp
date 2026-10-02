@@ -56,15 +56,15 @@ void EditorApp::RenderScene() {
   mainCam.camPos[0] = cpx;
   mainCam.camPos[1] = cpy;
   mainCam.camPos[2] = cpz;
-  mainCam.camFwd[0] = vf.m[2][0];
-  mainCam.camFwd[1] = vf.m[2][1];
+  mainCam.camFwd[0] = vf.m[0][2];
+  mainCam.camFwd[1] = vf.m[1][2];
   mainCam.camFwd[2] = vf.m[2][2];
   mainCam.camRight[0] = vf.m[0][0];
-  mainCam.camRight[1] = vf.m[0][1];
-  mainCam.camRight[2] = vf.m[0][2];
-  mainCam.camUp[0] = vf.m[1][0];
+  mainCam.camRight[1] = vf.m[1][0];
+  mainCam.camRight[2] = vf.m[2][0];
+  mainCam.camUp[0] = vf.m[0][1];
   mainCam.camUp[1] = vf.m[1][1];
-  mainCam.camUp[2] = vf.m[1][2];
+  mainCam.camUp[2] = vf.m[2][1];
   mainCam.fovY = camera.fovY;
   mainCam.aspect = aspect;
   mainCam.nearZ = camera.nearZ;
@@ -1200,6 +1200,21 @@ void EditorApp::DrawAssetBrowser() {
         assets.DeleteTextureFile(forceDeleteGuid, true, blocked);
       } else {
         assets.DeleteAssetFile(forceDeleteGuid, true, refs, blocked);
+      }
+      Announce(LogLevel::Warning, "Asset force deleted");
+      forceDeleteGuid.clear();
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cancel")) {
+      forceDeleteGuid.clear();
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+  ImGui::End();
+}
+}
       }
       Announce(LogLevel::Warning, "Asset force deleted");
       forceDeleteGuid.clear();
