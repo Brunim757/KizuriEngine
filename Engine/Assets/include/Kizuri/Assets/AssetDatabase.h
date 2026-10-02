@@ -197,11 +197,6 @@ private:
   bool TryReconnectByHash(const std::string& path, uint64_t hash, int64_t fileTime);
   void UpsertResult(const ImportResult& result);
   void UpsertTexResult(const ImportTexResult& result);
-  void EnqueueHash(const std::string& path, const std::string& guid, bool isTex);
-  bool HashPendingFor(const std::string& guid, bool isTex) const;
-  bool DecodePendingFor(const std::string& path) const;
-  bool SiblingUsable(const std::string& sourcePath, bool isTex) const;
-  bool TryReconnectByHash(const std::string& path, uint64_t hash, int64_t fileTime);
   MeshRecord* FindByGuid(const std::string& guid);
   void InitFreshMeshState(MeshRecord& record);
   void InitFreshTexState(TextureRecord& record);

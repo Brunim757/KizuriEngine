@@ -24,6 +24,15 @@ RHITextureFormat ToRHIFormat(TexFormat fmt, bool srgb) {
   }
   return srgb ? RHITextureFormat::RGBA8_UNORM_SRGB : RHITextureFormat::RGBA8_UNORM;
 }
+bool StatTime(const std::string& path, int64_t& ticks) {
+  std::error_code ec;
+  std::filesystem::file_time_type ft = std::filesystem::last_write_time(path, ec);
+  if (ec) {
+    return false;
+  }
+  ticks = static_cast<int64_t>(ft.time_since_epoch().count());
+  return true;
+}
 }
 ImportMeshTask::ImportMeshTask()
   : taskId(0)
@@ -297,15 +306,6 @@ void ImportTexTask::ExecuteRange(enki::TaskSetPartition range, uint32_t threadnu
     std::lock_guard<std::mutex> lock(*outMutex);
     outQueue->push_back(result);
   }
-}
-static bool StatTime(const std::string& path, int64_t& ticks) {
-  std::error_code ec;
-  std::filesystem::file_time_type ft = std::filesystem::last_write_time(path, ec);
-  if (ec) {
-    return false;
-  }
-  ticks = static_cast<int64_t>(ft.time_since_epoch().count());
-  return true;
 }
 HashTask::HashTask()
   : taskId(0)
