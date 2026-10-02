@@ -368,8 +368,6 @@ void AssetDatabase::EnqueueDecode(const std::string& compiledPath, bool isTex) {
     inflight.push_back(compiledPath);
   }
 }
-  inflight.push_back(compiledPath);
-}
 void AssetDatabase::EnqueueHash(const std::string& path, const std::string& guid, bool isTex) {
   EnsureJobs();
   if (!jobsReady) {
