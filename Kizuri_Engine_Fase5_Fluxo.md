@@ -3,7 +3,7 @@
 **Baseado em:** `Kizuri_Engine_TDD.md` e `Kizuri_Engine_Roadmap.md`, Fase 5.
 **Objetivo deste documento:** deixar explícito, passo a passo, como cada parte da iluminação funciona — pra você e pra qualquer agente de IA executando a fase não terem dúvida de comportamento.
 
-**Decisões fechadas:** entidade nasce só com `Transform` (Mesh/Light via Add Component ou drag-and-drop); suavização é **PCSS** (PCF removido); céu via depth + matriz inversa (como manda o Roadmap); FSR1 vendorado com cópia no deploy. **Em aberto:** hemisphere (proposto, revertido) e tilt de câmera (Seção 9).
+**Decisões fechadas:** entidade nasce só com `Transform` (Mesh/Light via Add Component ou drag-and-drop); suavização é **PCSS** (PCF removido); céu via depth + matriz inversa (como manda o Roadmap); FSR1 vendorado com cópia no deploy.
 
 ---
 
@@ -93,15 +93,7 @@ Cadeia: geometria → sombras → lighting → bloom → EASU → RCAS → FXAA 
 
 ---
 
-## 9. Em aberto
-
-**Tilt de câmera (5B, sem diagnóstico):** horizonte descrito como vertical ao mover. Eliminado por leitura: sem inversa no código, base sem roll, normais e aspecto OK. Bisseção sem código: sol com `Shadows` off — sumiu, é sombra (Debug CSM mostra onde); persistiu, é luz/céu (testar Sky off, ACES off).
-
-**Hemisphere (revertido):** faces opostas ao sol iam a ~3%. Proposta (céu/chão/intensidade no sol) revertida a pedido — não reimplementar sem decisão nova.
-
----
-
-## 10. "Pronto quando" da Fase 5
+## 9. "Pronto quando" da Fase 5
 
 - 10+ luzes dinâmicas com PCSS sem queda perceptível de frame.
 - Luz criada/ajustada pelo Inspector; sol sem nada selecionado.
