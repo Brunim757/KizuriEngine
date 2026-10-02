@@ -19,12 +19,33 @@ struct Transform {
   float rotation[3];
   float scale[3];
 };
+enum class LightType {
+  Point = 0,
+  Spot = 1,
+  Directional = 2
+};
+struct LightData {
+  int type;
+  float color[3];
+  float intensity;
+  float radius;
+  float spotAngle;
+  float falloff;
+  bool castShadow;
+  float lightSize;
+  int shadowSize;
+  float softness;
+  int cascades;
+  float lambda;
+};
 struct Entity {
   EntityId id;
   std::string name;
   Transform transform;
   std::string meshGuid;
   bool hasMesh;
+  LightData light;
+  bool hasLight;
   EntityId parent;
   std::vector<EntityId> children;
 };
@@ -58,5 +79,7 @@ private:
   EntityId DuplicateRecursive(EntityId id, EntityId newParent);
 };
 void MakeIdentityTransform(Transform& t);
+void MakeDefaultLight(LightData& l);
+void EntityForward(const Transform& t, float dir[3]);
 void ComposeMatrix(const Transform& t, float m[16]);
 }

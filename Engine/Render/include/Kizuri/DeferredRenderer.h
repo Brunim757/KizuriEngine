@@ -13,6 +13,26 @@ struct DeferredLight {
   float color[3];
   float intensity;
 };
+struct RenderPointLight {
+  float pos[3];
+  float color[3];
+  float intensity;
+  float radius;
+};
+struct RenderSpotLight {
+  float pos[3];
+  float dir[3];
+  float color[3];
+  float intensity;
+  float radius;
+  float angle;
+  float falloff;
+};
+struct RenderDirectionalLight {
+  float dir[3];
+  float color[3];
+  float intensity;
+};
 class DeferredRenderer {
 public:
   DeferredRenderer();
@@ -22,6 +42,10 @@ public:
   bool SetMesh(const float* positions, const float* normals, const float* uvs, size_t vertexCount, const uint32_t* indices, size_t indexCount);
   void SetMaterial(const DeferredMaterial& mat);
   void SetLight(const DeferredLight& light);
+  void ClearLights();
+  void AddPointLight(const RenderPointLight& light);
+  void AddSpotLight(const RenderSpotLight& light);
+  void AddDirectionalLight(const RenderDirectionalLight& light);
   bool Resize(int w, int h);
   void SetViewOffset(float x, float y);
   void Render(const float view[16], const float proj[16], const float camPos[3]);
@@ -63,6 +87,9 @@ private:
   bool ready;
   DeferredMaterial material;
   DeferredLight light;
+  std::vector<RenderPointLight> pointLights;
+  std::vector<RenderSpotLight> spotLights;
+  std::vector<RenderDirectionalLight> dirLights;
   bool CreateTargets();
   void DestroyTargets();
   void RenderInternal(const float view[16], const float proj[16], const float camPos[3], bool toTexture);

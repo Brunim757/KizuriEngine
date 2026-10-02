@@ -12,6 +12,11 @@ struct LightConstants {
   float camPos[4];
   float lightDir[4];
   float lightColor[4];
+  float counts[4];
+  float lightA[16][4];
+  float lightB[16][4];
+  float lightC[16][4];
+  float lightD[16][4];
 };
 struct MatConstants {
   float albedo[4];
@@ -181,6 +186,29 @@ void DeferredRenderer::SetMaterial(const DeferredMaterial& mat) {
 }
 void DeferredRenderer::SetLight(const DeferredLight& l) {
   light = l;
+}
+void DeferredRenderer::ClearLights() {
+  pointLights.clear();
+  spotLights.clear();
+  dirLights.clear();
+}
+void DeferredRenderer::AddPointLight(const RenderPointLight& l) {
+  if (pointLights.size() + spotLights.size() + dirLights.size() >= 16) {
+    return;
+  }
+  pointLights.push_back(l);
+}
+void DeferredRenderer::AddSpotLight(const RenderSpotLight& l) {
+  if (pointLights.size() + spotLights.size() + dirLights.size() >= 16) {
+    return;
+  }
+  spotLights.push_back(l);
+}
+void DeferredRenderer::AddDirectionalLight(const RenderDirectionalLight& l) {
+  if (pointLights.size() + spotLights.size() + dirLights.size() >= 16) {
+    return;
+  }
+  dirLights.push_back(l);
 }
 bool DeferredRenderer::Resize(int nw, int nh) {
   if (nw <= 0 || nh <= 0) {
@@ -358,14 +386,116 @@ void DeferredRenderer::EndInternal(const float camPos[3], bool toTexture) {
   lc.camPos[1] = camPos[1];
   lc.camPos[2] = camPos[2];
   lc.camPos[3] = 1.0f;
-  lc.lightDir[0] = light.direction[0];
-  lc.lightDir[1] = light.direction[1];
-  lc.lightDir[2] = light.direction[2];
+  bool useFallback = dirLights.empty();
+  lc.lightDir[0] = useFallback ? light.direction[0] : 0.0f;
+  lc.lightDir[1] = useFallback ? light.direction[1] : 0.0f;
+  lc.lightDir[2] = useFallback ? light.direction[2] : 0.0f;
   lc.lightDir[3] = 0.0f;
-  lc.lightColor[0] = light.color[0] * light.intensity;
-  lc.lightColor[1] = light.color[1] * light.intensity;
-  lc.lightColor[2] = light.color[2] * light.intensity;
+  lc.lightColor[0] = useFallback ? light.color[0] * light.intensity : 0.0f;
+  lc.lightColor[1] = useFallback ? light.color[1] * light.intensity : 0.0f;
+  lc.lightColor[2] = useFallback ? light.color[2] * light.intensity : 0.0f;
   lc.lightColor[3] = 1.0f;
+  size_t total = pointLights.size() + spotLights.size() + dirLights.size();
+  if (total > 16) {
+    total = 16;
+  }
+  lc.counts[0] = static_cast<float>(total);
+  lc.counts[1] = 0.0f;
+  lc.counts[2] = 0.0f;
+  lc.counts[3] = 0.0f;
+  size_t li = 0;
+  for (size_t i = 0; i < pointLights.size() && li < 16; ++i) {
+    const RenderPointLight& pl = pointLights[i];
+    lc.lightA[li][0] = pl.pos[0];
+    lc.lightA[li][1] = pl.pos[1];
+    lc.lightA[li][2] = pl.pos[2];
+    lc.lightA[li][3] = 0.0f;
+    lc.lightB[li][0] = 0.0f;
+    lc.lightB[li][1] = 0.0f;
+    lc.lightB[li][2] = 0.0f;
+    lc.lightB[li][3] = pl.radius;
+    lc.lightC[li][0] = pl.color[0] * pl.intensity;
+    lc.lightC[li][1] = pl.color[1] * pl.intensity;
+    lc.lightC[li][2] = pl.color[2] * pl.intensity;
+    lc.lightC[li][3] = 0.0f;
+    lc.lightD[li][0] = 0.0f;
+    lc.lightD[li][1] = 0.0f;
+    lc.lightD[li][2] = 0.0f;
+    lc.lightD[li][3] = 0.0f;
+    ++li;
+  }
+  for (size_t i = 0; i < spotLights.size() && li < 16; ++i) {
+    const RenderSpotLight& sl = spotLights[i];
+    float angle = sl.angle;
+    if (angle < 1.0f) {
+      angle = 1.0f;
+    }
+    if (angle > 170.0f) {
+      angle = 170.0f;
+    }
+    lc.lightA[li][0] = sl.pos[0];
+    lc.lightA[li][1] = sl.pos[1];
+    lc.lightA[li][2] = sl.pos[2];
+    lc.lightA[li][3] = 1.0f;
+    lc.lightB[li][0] = sl.dir[0];
+    lc.lightB[li][1] = sl.dir[1];
+    lc.lightB[li][2] = sl.dir[2];
+    lc.lightB[li][3] = sl.radius;
+    lc.lightC[li][0] = sl.color[0] * sl.intensity;
+    lc.lightC[li][1] = sl.color[1] * sl.intensity;
+    lc.lightC[li][2] = sl.color[2] * sl.intensity;
+    lc.lightC[li][3] = cosf(angle * 0.5f * 0.01745329252f);
+    float fw = sl.falloff;
+    if (fw < 0.01f) {
+      fw = 0.01f;
+    }
+    if (fw > 0.5f) {
+      fw = 0.5f;
+    }
+    lc.lightD[li][0] = fw;
+    lc.lightD[li][1] = 0.0f;
+    lc.lightD[li][2] = 0.0f;
+    lc.lightD[li][3] = 0.0f;
+    ++li;
+  }
+  for (size_t i = 0; i < dirLights.size() && li < 16; ++i) {
+    const RenderDirectionalLight& dl = dirLights[i];
+    lc.lightA[li][0] = dl.dir[0];
+    lc.lightA[li][1] = dl.dir[1];
+    lc.lightA[li][2] = dl.dir[2];
+    lc.lightA[li][3] = 2.0f;
+    lc.lightB[li][0] = 0.0f;
+    lc.lightB[li][1] = 0.0f;
+    lc.lightB[li][2] = 0.0f;
+    lc.lightB[li][3] = 0.0f;
+    lc.lightC[li][0] = dl.color[0] * dl.intensity;
+    lc.lightC[li][1] = dl.color[1] * dl.intensity;
+    lc.lightC[li][2] = dl.color[2] * dl.intensity;
+    lc.lightC[li][3] = 0.0f;
+    lc.lightD[li][0] = 0.0f;
+    lc.lightD[li][1] = 0.0f;
+    lc.lightD[li][2] = 0.0f;
+    lc.lightD[li][3] = 0.0f;
+    ++li;
+  }
+  for (; li < 16; ++li) {
+    lc.lightA[li][0] = 0.0f;
+    lc.lightA[li][1] = 0.0f;
+    lc.lightA[li][2] = 0.0f;
+    lc.lightA[li][3] = 0.0f;
+    lc.lightB[li][0] = 0.0f;
+    lc.lightB[li][1] = 0.0f;
+    lc.lightB[li][2] = 0.0f;
+    lc.lightB[li][3] = 1.0f;
+    lc.lightC[li][0] = 0.0f;
+    lc.lightC[li][1] = 0.0f;
+    lc.lightC[li][2] = 0.0f;
+    lc.lightC[li][3] = 0.0f;
+    lc.lightD[li][0] = 0.0f;
+    lc.lightD[li][1] = 0.0f;
+    lc.lightD[li][2] = 0.0f;
+    lc.lightD[li][3] = 0.0f;
+  }
   rhi->UpdateConstantBuffer(lightCB, &lc, sizeof(lc));
   rhi->SetPixelConstantBuffer(0, lightCB);
   rhi->DrawFullscreenTriangle();

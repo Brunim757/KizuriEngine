@@ -15,6 +15,8 @@ struct SnapshotNode {
   Transform transform;
   std::string meshGuid;
   bool hasMesh;
+  LightData light;
+  bool hasLight;
   long parent;
 };
 struct EntitySnapshot {
@@ -113,6 +115,39 @@ private:
   EntityId target;
   std::string prevGuid;
   bool applied;
+};
+class SetLightCmd : public Command {
+public:
+  SetLightCmd(EntityId target, const LightData& before, const LightData& after);
+  bool Apply(Scene& scene) override;
+  bool Revert(Scene& scene) override;
+  const char* Name() const override;
+private:
+  EntityId target;
+  LightData before;
+  LightData after;
+};
+class AddLightCmd : public Command {
+public:
+  explicit AddLightCmd(EntityId target);
+  bool Apply(Scene& scene) override;
+  bool Revert(Scene& scene) override;
+  const char* Name() const override;
+private:
+  EntityId target;
+  LightData prevLight;
+  bool prevHas;
+};
+class RemoveLightCmd : public Command {
+public:
+  explicit RemoveLightCmd(EntityId target);
+  bool Apply(Scene& scene) override;
+  bool Revert(Scene& scene) override;
+  const char* Name() const override;
+private:
+  EntityId target;
+  LightData prevLight;
+  bool prevHas;
 };
 class SetParentCmd : public Command {
 public:

@@ -49,6 +49,48 @@ void EditorApp::RenderScene() {
   camera.GetPosition(cpx, cpy, cpz);
   float cpos[3] = { cpx, cpy, cpz };
   renderer.BeginObjects(&vf.m[0][0], &pf.m[0][0]);
+  renderer.ClearLights();
+  std::vector<EntityId> lightIds = scene.All();
+  for (size_t i = 0; i < lightIds.size(); ++i) {
+    const Entity* e = scene.Get(lightIds[i]);
+    if (e == nullptr || !e->hasLight) {
+      continue;
+    }
+    if (e->light.type == static_cast<int>(LightType::Point)) {
+      RenderPointLight pl;
+      pl.pos[0] = e->transform.position[0];
+      pl.pos[1] = e->transform.position[1];
+      pl.pos[2] = e->transform.position[2];
+      pl.color[0] = e->light.color[0];
+      pl.color[1] = e->light.color[1];
+      pl.color[2] = e->light.color[2];
+      pl.intensity = e->light.intensity;
+      pl.radius = e->light.radius;
+      renderer.AddPointLight(pl);
+    } else if (e->light.type == static_cast<int>(LightType::Spot)) {
+      RenderSpotLight sl;
+      sl.pos[0] = e->transform.position[0];
+      sl.pos[1] = e->transform.position[1];
+      sl.pos[2] = e->transform.position[2];
+      EntityForward(e->transform, sl.dir);
+      sl.color[0] = e->light.color[0];
+      sl.color[1] = e->light.color[1];
+      sl.color[2] = e->light.color[2];
+      sl.intensity = e->light.intensity;
+      sl.radius = e->light.radius;
+      sl.angle = e->light.spotAngle;
+      sl.falloff = e->light.falloff;
+      renderer.AddSpotLight(sl);
+    } else if (e->light.type == static_cast<int>(LightType::Directional)) {
+      RenderDirectionalLight dl;
+      EntityForward(e->transform, dl.dir);
+      dl.color[0] = e->light.color[0];
+      dl.color[1] = e->light.color[1];
+      dl.color[2] = e->light.color[2];
+      dl.intensity = e->light.intensity;
+      renderer.AddDirectionalLight(dl);
+    }
+  }
   DeferredMaterial grayMat;
   grayMat.albedo[0] = 0.4f;
   grayMat.albedo[1] = 0.4f;
@@ -659,14 +701,90 @@ void EditorApp::DrawInspector() {
     }
     DrawMeshSection(e);
   }
-  if (!e->hasMesh) {
+  if (e->hasLight) {
+    ImGui::Separator();
+    ImGui::Text("Light");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Remove##light")) {
+      std::unique_ptr<Command> cmd(new RemoveLightCmd(e->id));
+      undo.Execute(std::move(cmd), scene);
+    }
+    LightData light = e->light;
+    int lightMode = light.type;
+    if (lightMode < 0 || lightMode > 2) {
+      lightMode = 0;
+    }
+    bool lightChanged = false;
+    if (ImGui::Combo("Type", &lightMode, "Point\0Spot\0Directional\0")) {
+      light.type = lightMode;
+      lightChanged = true;
+    }
+    if (ImGui::ColorEdit3("Color", light.color)) {
+      lightChanged = true;
+    }
+    if (ImGui::DragFloat("Intensity", &light.intensity, 0.05f, 0.0f, 20.0f)) {
+      lightChanged = true;
+    }
+    if (light.type == static_cast<int>(LightType::Point) || light.type == static_cast<int>(LightType::Spot)) {
+      if (ImGui::DragFloat("Radius", &light.radius, 0.1f, 0.5f, 100.0f)) {
+        lightChanged = true;
+      }
+    }
+    if (light.type == static_cast<int>(LightType::Spot)) {
+      if (ImGui::DragFloat("Angle", &light.spotAngle, 0.5f, 1.0f, 170.0f)) {
+        lightChanged = true;
+      }
+      if (ImGui::DragFloat("Falloff", &light.falloff, 0.01f, 0.01f, 0.5f)) {
+        lightChanged = true;
+      }
+    }
+    bool showShadow = light.castShadow;
+    if (ImGui::Checkbox("Cast Shadow", &showShadow)) {
+      light.castShadow = showShadow;
+      lightChanged = true;
+    }
+    if (light.castShadow) {
+      if (ImGui::DragFloat("Light Size", &light.lightSize, 0.01f, 0.0f, 2.0f)) {
+        lightChanged = true;
+      }
+      int resMode = 1;
+      if (light.shadowSize == 512) {
+        resMode = 0;
+      } else if (light.shadowSize == 2048) {
+        resMode = 2;
+      }
+      if (ImGui::Combo("Shadow Size", &resMode, "512\0""1024\0""2048\0")) {
+        light.shadowSize = resMode == 0 ? 512 : (resMode == 2 ? 2048 : 1024);
+        lightChanged = true;
+      }
+      if (ImGui::DragFloat("Softness", &light.softness, 0.01f, 0.0f, 2.0f)) {
+        lightChanged = true;
+      }
+      if (light.type == static_cast<int>(LightType::Directional)) {
+        if (ImGui::SliderInt("Cascades", &light.cascades, 2, 4)) {
+          lightChanged = true;
+        }
+        if (ImGui::DragFloat("Lambda", &light.lambda, 0.01f, 0.0f, 1.0f)) {
+          lightChanged = true;
+        }
+      }
+    }
+    if (lightChanged) {
+      edits.PushLight(e->id, light);
+    }
+  }
+  if (!e->hasMesh || !e->hasLight) {
     ImGui::Separator();
     if (ImGui::Button("Add Component")) {
       ImGui::OpenPopup("AddComponent");
     }
     if (ImGui::BeginPopup("AddComponent")) {
-      if (ImGui::MenuItem("Mesh Renderer")) {
+      if (!e->hasMesh && ImGui::MenuItem("Mesh Renderer")) {
         std::unique_ptr<Command> cmd(new AddMeshCmd(e->id));
+        undo.Execute(std::move(cmd), scene);
+      }
+      if (!e->hasLight && ImGui::MenuItem("Light")) {
+        std::unique_ptr<Command> cmd(new AddLightCmd(e->id));
         undo.Execute(std::move(cmd), scene);
       }
       ImGui::EndPopup();

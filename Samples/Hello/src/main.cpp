@@ -32,6 +32,7 @@
 #include <filesystem>
 #include <TaskScheduler.h>
 #include <cstdio>
+#include <cmath>
 #include <cstring>
 #include <atomic>
 namespace {
@@ -2141,6 +2142,221 @@ bool TestGltfTextured() {
   fs::remove_all(dir, ec);
   return true;
 }
+bool TestLightDefaults() {
+  Kizuri::LightData l;
+  Kizuri::MakeDefaultLight(l);
+  if (l.type != static_cast<int>(Kizuri::LightType::Point)) {
+    return false;
+  }
+  if (l.intensity != 3.0f || l.radius != 10.0f || l.spotAngle != 45.0f || l.falloff != 0.1f) {
+    return false;
+  }
+  if (l.castShadow || l.lightSize != 0.3f || l.shadowSize != 1024 || l.softness != 0.3f) {
+    return false;
+  }
+  if (l.cascades != 3 || l.lambda != 0.5f) {
+    return false;
+  }
+  Kizuri::Scene scene;
+  Kizuri::EntityId a = scene.CreateEntity("A");
+  if (scene.Get(a)->hasLight) {
+    return false;
+  }
+  return true;
+}
+bool TestLightTypeRetention() {
+  Kizuri::Scene scene;
+  Kizuri::UndoStack undo;
+  Kizuri::EntityId a = scene.CreateEntity("A");
+  std::unique_ptr<Kizuri::Command> add(new Kizuri::AddLightCmd(a));
+  if (!undo.Execute(std::move(add), scene)) {
+    return false;
+  }
+  Kizuri::LightData spot = scene.Get(a)->light;
+  spot.type = static_cast<int>(Kizuri::LightType::Spot);
+  spot.spotAngle = 60.0f;
+  spot.radius = 30.0f;
+  std::unique_ptr<Kizuri::Command> setSpot(new Kizuri::SetLightCmd(a, scene.Get(a)->light, spot));
+  if (!undo.Execute(std::move(setSpot), scene)) {
+    return false;
+  }
+  Kizuri::LightData point = scene.Get(a)->light;
+  point.type = static_cast<int>(Kizuri::LightType::Point);
+  std::unique_ptr<Kizuri::Command> setPoint(new Kizuri::SetLightCmd(a, scene.Get(a)->light, point));
+  if (!undo.Execute(std::move(setPoint), scene)) {
+    return false;
+  }
+  if (scene.Get(a)->light.spotAngle != 60.0f || scene.Get(a)->light.radius != 30.0f) {
+    return false;
+  }
+  return true;
+}
+bool TestLightRoundTrip() {
+  Kizuri::Scene scene;
+  Kizuri::EntityId p = scene.CreateEntity("Point");
+  scene.Get(p)->hasLight = true;
+  Kizuri::MakeDefaultLight(scene.Get(p)->light);
+  Kizuri::EntityId s = scene.CreateEntity("Spot");
+  scene.Get(s)->hasLight = true;
+  Kizuri::MakeDefaultLight(scene.Get(s)->light);
+  scene.Get(s)->light.type = static_cast<int>(Kizuri::LightType::Spot);
+  scene.Get(s)->light.spotAngle = 60.0f;
+  scene.Get(s)->light.falloff = 0.2f;
+  scene.Get(s)->light.castShadow = true;
+  scene.Get(s)->light.lightSize = 0.4f;
+  scene.Get(s)->light.shadowSize = 512;
+  scene.Get(s)->light.softness = 0.7f;
+  Kizuri::EntityId d = scene.CreateEntity("Sun");
+  scene.Get(d)->hasLight = true;
+  Kizuri::MakeDefaultLight(scene.Get(d)->light);
+  scene.Get(d)->light.type = static_cast<int>(Kizuri::LightType::Directional);
+  scene.Get(d)->light.intensity = 2.5f;
+  scene.Get(d)->light.castShadow = true;
+  scene.Get(d)->light.cascades = 2;
+  scene.Get(d)->light.lambda = 0.7f;
+  scene.Get(d)->light.softness = 0.5f;
+  scene.Get(d)->light.lightSize = 0.5f;
+  const char* path = "test_light_tmp.kzscene";
+  std::remove(path);
+  if (!Kizuri::SaveSceneToFile(scene, path)) {
+    return false;
+  }
+  Kizuri::Scene back;
+  if (!Kizuri::LoadSceneFromFile(back, path, nullptr)) {
+    std::remove(path);
+    return false;
+  }
+  std::remove(path);
+  const Kizuri::Entity* rp = nullptr;
+  const Kizuri::Entity* rs = nullptr;
+  const Kizuri::Entity* rd = nullptr;
+  std::vector<Kizuri::EntityId> all = back.All();
+  for (size_t i = 0; i < all.size(); ++i) {
+    const Kizuri::Entity* ce = back.Get(all[i]);
+    if (ce->name == "Point") {
+      rp = ce;
+    } else if (ce->name == "Spot") {
+      rs = ce;
+    } else if (ce->name == "Sun") {
+      rd = ce;
+    }
+  }
+  if (rp == nullptr || rs == nullptr || rd == nullptr) {
+    return false;
+  }
+  if (!rp->hasLight || rp->light.type != static_cast<int>(Kizuri::LightType::Point) || rp->light.castShadow) {
+    return false;
+  }
+  if (!rs->hasLight || rs->light.spotAngle != 60.0f || rs->light.falloff != 0.2f) {
+    return false;
+  }
+  if (!rs->light.castShadow || rs->light.shadowSize != 512 || std::fabs(rs->light.softness - 0.7f) > 1e-6f) {
+    return false;
+  }
+  if (!rd->hasLight || rd->light.type != static_cast<int>(Kizuri::LightType::Directional)) {
+    return false;
+  }
+  if (!rd->light.castShadow || rd->light.cascades != 2 || std::fabs(rd->light.lambda - 0.7f) > 1e-6f) {
+    return false;
+  }
+  return true;
+}
+bool TestLightUndo() {
+  Kizuri::Scene scene;
+  Kizuri::UndoStack undo;
+  Kizuri::EditQueue edits;
+  Kizuri::EntityId a = scene.CreateEntity("A");
+  std::unique_ptr<Kizuri::Command> add(new Kizuri::AddLightCmd(a));
+  if (!undo.Execute(std::move(add), scene) || !scene.Get(a)->hasLight) {
+    return false;
+  }
+  if (scene.Get(a)->light.type != static_cast<int>(Kizuri::LightType::Point)) {
+    return false;
+  }
+  Kizuri::LightData v = scene.Get(a)->light;
+  v.intensity = 9.0f;
+  edits.PushLight(a, v);
+  Kizuri::LightData v2 = v;
+  v2.intensity = 10.0f;
+  edits.PushLight(a, v2);
+  if (edits.Pending() != 2) {
+    return false;
+  }
+  if (edits.ApplyAll(scene, undo) != 1) {
+    return false;
+  }
+  if (scene.Get(a)->light.intensity != 10.0f) {
+    return false;
+  }
+  if (!undo.Undo(scene) || scene.Get(a)->light.intensity != 3.0f) {
+    return false;
+  }
+  if (!undo.Redo(scene) || scene.Get(a)->light.intensity != 10.0f) {
+    return false;
+  }
+  std::unique_ptr<Kizuri::Command> rem(new Kizuri::RemoveLightCmd(a));
+  if (!undo.Execute(std::move(rem), scene) || scene.Get(a)->hasLight) {
+    return false;
+  }
+  if (!undo.Undo(scene) || !scene.Get(a)->hasLight || scene.Get(a)->light.intensity != 10.0f) {
+    return false;
+  }
+  return true;
+}
+bool TestEntityForward() {
+  Kizuri::Transform t;
+  Kizuri::MakeIdentityTransform(t);
+  float dir[3] = { 0.0f, 0.0f, 0.0f };
+  Kizuri::EntityForward(t, dir);
+  if (std::fabs(dir[0]) > 0.01f || std::fabs(dir[1]) > 0.01f || std::fabs(dir[2] - 1.0f) > 0.01f) {
+    return false;
+  }
+  t.rotation[1] = 90.0f;
+  Kizuri::EntityForward(t, dir);
+  if (std::fabs(dir[0] - 1.0f) > 0.01f || std::fabs(dir[1]) > 0.01f || std::fabs(dir[2]) > 0.01f) {
+    return false;
+  }
+  t.rotation[1] = 0.0f;
+  t.rotation[0] = 90.0f;
+  Kizuri::EntityForward(t, dir);
+  if (std::fabs(dir[0]) > 0.01f || std::fabs(dir[1] + 1.0f) > 0.01f || std::fabs(dir[2]) > 0.01f) {
+    return false;
+  }
+  return true;
+}
+bool TestPBRPointSpot() {
+  float albedo[3] = { 0.8f, 0.2f, 0.15f };
+  float N[3] = { 0.0f, 1.0f, 0.0f };
+  float V[3] = { 0.3f, 0.9f, 0.2f };
+  float L[3] = { 0.4f, 0.9f, 0.1f };
+  float light[3] = { 3.0f, 3.0f, 3.0f };
+  float out[3] = { 0.0f, 0.0f, 0.0f };
+  Kizuri::PBR_Point(albedo, 0.5f, 0.0f, N, V, L, 5.0f, 10.0f, light, out);
+  if (!(out[0] > 0.0f && out[1] > 0.0f && out[2] > 0.0f)) {
+    return false;
+  }
+  float far[3] = { 0.0f, 0.0f, 0.0f };
+  Kizuri::PBR_Point(albedo, 0.5f, 0.0f, N, V, L, 50.0f, 10.0f, light, far);
+  if (!(far[0] == 0.0f && far[1] == 0.0f && far[2] == 0.0f)) {
+    return false;
+  }
+  float N2[3] = { 0.0f, 1.0f, 0.0f };
+  float V2[3] = { 0.0f, 1.0f, 0.0f };
+  float L2[3] = { 0.0f, 1.0f, 0.0f };
+  float sd2[3] = { 0.0f, -1.0f, 0.0f };
+  float hit[3] = { 0.0f, 0.0f, 0.0f };
+  Kizuri::PBR_Spot(albedo, 0.5f, 0.0f, N2, V2, L2, 5.0f, 10.0f, sd2, 0.9f, 0.1f, light, hit);
+  if (!(hit[0] > 0.0f)) {
+    return false;
+  }
+  float sd3[3] = { 0.0f, 1.0f, 0.0f };
+  float miss[3] = { 1.0f, 1.0f, 1.0f };
+  Kizuri::PBR_Spot(albedo, 0.5f, 0.0f, N2, V2, L2, 5.0f, 10.0f, sd3, 0.9f, 0.1f, light, miss);
+  if (!(miss[0] == 0.0f && miss[1] == 0.0f && miss[2] == 0.0f)) {
+    return false;
+  }
+  return true;
+}
 bool TestAddRemoveMeshComponent() {
   Kizuri::Scene scene;
   Kizuri::UndoStack undo;
@@ -2607,6 +2823,12 @@ int main() {
   failures += Check("MeshStaging", TestMeshStaging());
   failures += Check("SetMeshGuid", TestSetMeshGuid());
   failures += Check("AddRemoveMesh", TestAddRemoveMeshComponent());
+  failures += Check("LightDefaults", TestLightDefaults());
+  failures += Check("LightTypeRetention", TestLightTypeRetention());
+  failures += Check("LightRoundTrip", TestLightRoundTrip());
+  failures += Check("LightUndo", TestLightUndo());
+  failures += Check("EntityForward", TestEntityForward());
+  failures += Check("PBR-PointSpot", TestPBRPointSpot());
   failures += Check("DbTextures", TestDbTextures());
   if (failures == 0) {
     std::printf("KizuriHello: all bootstrap libs linked and functional\n");

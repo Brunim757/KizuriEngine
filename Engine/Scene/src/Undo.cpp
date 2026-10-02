@@ -27,6 +27,8 @@ bool EntitySnapshot::Capture(const Scene& scene, EntityId root) {
     node.transform = e->transform;
     node.meshGuid = e->meshGuid;
     node.hasMesh = e->hasMesh;
+    node.light = e->light;
+    node.hasLight = e->hasLight;
     node.parent = par;
     long idx = static_cast<long>(nodes.size());
     nodes.push_back(node);
@@ -52,6 +54,8 @@ EntityId EntitySnapshot::Restore(Scene& scene, EntityId newParent) const {
     if (createdEntity != nullptr) {
       createdEntity->meshGuid = nodes[i].meshGuid;
       createdEntity->hasMesh = nodes[i].hasMesh;
+      createdEntity->light = nodes[i].light;
+      createdEntity->hasLight = nodes[i].hasLight;
     }
     created.push_back(id);
   }
@@ -277,6 +281,92 @@ bool RemoveMeshCmd::Revert(Scene& scene) {
 }
 const char* RemoveMeshCmd::Name() const {
   return "Remove Mesh";
+}
+SetLightCmd::SetLightCmd(EntityId t, const LightData& b, const LightData& a)
+  : target(t)
+  , before(b)
+  , after(a) {
+}
+bool SetLightCmd::Apply(Scene& scene) {
+  Entity* e = scene.Get(target);
+  if (e == nullptr || !e->hasLight) {
+    return false;
+  }
+  e->light = after;
+  scene.MarkDirty();
+  return true;
+}
+bool SetLightCmd::Revert(Scene& scene) {
+  Entity* e = scene.Get(target);
+  if (e == nullptr || !e->hasLight) {
+    return false;
+  }
+  e->light = before;
+  scene.MarkDirty();
+  return true;
+}
+const char* SetLightCmd::Name() const {
+  return "Set Light";
+}
+AddLightCmd::AddLightCmd(EntityId t)
+  : target(t)
+  , prevHas(false) {
+  MakeDefaultLight(prevLight);
+}
+bool AddLightCmd::Apply(Scene& scene) {
+  Entity* e = scene.Get(target);
+  if (e == nullptr || e->hasLight) {
+    return false;
+  }
+  prevLight = e->light;
+  prevHas = e->hasLight;
+  e->hasLight = true;
+  MakeDefaultLight(e->light);
+  scene.MarkDirty();
+  return true;
+}
+bool AddLightCmd::Revert(Scene& scene) {
+  Entity* e = scene.Get(target);
+  if (e == nullptr) {
+    return false;
+  }
+  e->light = prevLight;
+  e->hasLight = prevHas;
+  scene.MarkDirty();
+  return true;
+}
+const char* AddLightCmd::Name() const {
+  return "Add Light";
+}
+RemoveLightCmd::RemoveLightCmd(EntityId t)
+  : target(t)
+  , prevHas(false) {
+  MakeDefaultLight(prevLight);
+}
+bool RemoveLightCmd::Apply(Scene& scene) {
+  Entity* e = scene.Get(target);
+  if (e == nullptr || !e->hasLight) {
+    return false;
+  }
+  prevLight = e->light;
+  prevHas = e->hasLight;
+  e->hasLight = false;
+  MakeDefaultLight(e->light);
+  scene.MarkDirty();
+  return true;
+}
+bool RemoveLightCmd::Revert(Scene& scene) {
+  Entity* e = scene.Get(target);
+  if (e == nullptr) {
+    return false;
+  }
+  e->light = prevLight;
+  e->hasLight = prevHas;
+  scene.MarkDirty();
+  return true;
+}
+const char* RemoveLightCmd::Name() const {
+  return "Remove Light";
 }
 SetParentCmd::SetParentCmd(EntityId c, EntityId b, EntityId a)
   : child(c)

@@ -136,6 +136,23 @@ bool SaveSceneToFile(const Scene& scene, const std::string& path) {
     if (e->hasMesh) {
       std::fprintf(fp, "MESH \"%s\"\n", EscapeName(e->meshGuid).c_str());
     }
+    if (e->hasLight) {
+      const LightData& l = e->light;
+      std::fprintf(fp, "LIGHT %d %.9g %.9g %.9g %.9g", l.type, l.color[0], l.color[1], l.color[2], l.intensity);
+      if (l.type == static_cast<int>(LightType::Point) || l.type == static_cast<int>(LightType::Spot)) {
+        std::fprintf(fp, " %.9g", l.radius);
+      }
+      if (l.type == static_cast<int>(LightType::Spot)) {
+        std::fprintf(fp, " %.9g %.9g", l.spotAngle, l.falloff);
+      }
+      if (l.castShadow) {
+        std::fprintf(fp, " %d %.9g %d %.9g", 1, l.lightSize, l.shadowSize, l.softness);
+      }
+      if (l.type == static_cast<int>(LightType::Directional) && l.castShadow) {
+        std::fprintf(fp, " %d %.9g", l.cascades, l.lambda);
+      }
+      std::fprintf(fp, "\n");
+    }
   }
   std::fclose(fp);
   return true;
@@ -171,6 +188,8 @@ bool LoadSceneFromFile(Scene& scene, const std::string& path, LogStore* log) {
     Transform transform;
     std::string meshGuid;
     bool hasMesh;
+    LightData light;
+    bool hasLight;
   };
   std::vector<PendingEntity> pending;
   PendingEntity* current = nullptr;
@@ -186,7 +205,9 @@ bool LoadSceneFromFile(Scene& scene, const std::string& path, LogStore* log) {
     if (s.compare(0, 7, "ENTITY ") == 0) {
       PendingEntity pe;
       MakeIdentityTransform(pe.transform);
+      MakeDefaultLight(pe.light);
       pe.hasMesh = false;
+      pe.hasLight = false;
       pe.parentIdx = -1;
       size_t pos = 7;
       if (!ParseQuoted(s, pos, pe.name) || pe.name.empty()) {
@@ -211,6 +232,71 @@ bool LoadSceneFromFile(Scene& scene, const std::string& path, LogStore* log) {
         }
         current->meshGuid = guid;
         current->hasMesh = true;
+        continue;
+      }
+      if (field == "LIGHT") {
+        size_t pos = (sp == std::string::npos) ? s.size() : sp + 1;
+        float b[6] = { 0.0f, 1.0f, 1.0f, 1.0f, 3.0f, 0.0f };
+        if (!ParseFloats(s, pos, b, 6)) {
+          failed = true;
+          break;
+        }
+        MakeDefaultLight(current->light);
+        current->light.type = static_cast<int>(b[0]);
+        if (current->light.type < 0 || current->light.type > 2) {
+          current->light.type = 0;
+        }
+        current->light.color[0] = b[1];
+        current->light.color[1] = b[2];
+        current->light.color[2] = b[3];
+        current->light.intensity = b[4];
+        if (current->light.type == static_cast<int>(LightType::Point) || current->light.type == static_cast<int>(LightType::Spot)) {
+          float r[1] = { 10.0f };
+          if (!ParseFloats(s, pos, r, 1)) {
+            failed = true;
+            break;
+          }
+          current->light.radius = r[0];
+        }
+        if (current->light.type == static_cast<int>(LightType::Spot)) {
+          float sf[2] = { 45.0f, 0.1f };
+          if (!ParseFloats(s, pos, sf, 2)) {
+            failed = true;
+            break;
+          }
+          current->light.spotAngle = sf[0];
+          current->light.falloff = sf[1];
+        }
+        float sg[4] = { 0.0f, 0.3f, 1024.0f, 0.3f };
+        if (ParseFloats(s, pos, sg, 4)) {
+          current->light.castShadow = sg[0] > 0.5f;
+          current->light.lightSize = sg[1];
+          current->light.shadowSize = static_cast<int>(sg[2]);
+          if (current->light.shadowSize != 512 && current->light.shadowSize != 1024 && current->light.shadowSize != 2048) {
+            current->light.shadowSize = 1024;
+          }
+          current->light.softness = sg[3];
+          if (current->light.softness < 0.0f) {
+            current->light.softness = 0.0f;
+          }
+          if (current->light.softness > 2.0f) {
+            current->light.softness = 2.0f;
+          }
+        }
+        if (current->light.type == static_cast<int>(LightType::Directional)) {
+          float cl[2] = { 3.0f, 0.5f };
+          if (ParseFloats(s, pos, cl, 2)) {
+            current->light.cascades = static_cast<int>(cl[0]);
+            if (current->light.cascades < 2) {
+              current->light.cascades = 2;
+            }
+            if (current->light.cascades > 4) {
+              current->light.cascades = 4;
+            }
+            current->light.lambda = cl[1];
+          }
+        }
+        current->hasLight = true;
         continue;
       }
       const FieldDesc* fd = nullptr;
@@ -269,6 +355,8 @@ bool LoadSceneFromFile(Scene& scene, const std::string& path, LogStore* log) {
     if (createdEntity != nullptr) {
       createdEntity->meshGuid = pending[i].meshGuid;
       createdEntity->hasMesh = pending[i].hasMesh;
+      createdEntity->light = pending[i].light;
+      createdEntity->hasLight = pending[i].hasLight;
     }
     created.push_back(id);
   }

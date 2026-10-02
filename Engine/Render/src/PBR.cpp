@@ -27,8 +27,17 @@ float GA_SchlickGGX(float cosLi, float cosLo, float roughness) {
   float k = (r * r) / 8.0f;
   return GA_SchlickG1(cosLi, k) * GA_SchlickG1(cosLo, k);
 }
+float Smooth01(float e0, float e1, float x) {
+  float t = (x - e0) / (e1 - e0);
+  if (t < 0.0f) {
+    t = 0.0f;
+  }
+  if (t > 1.0f) {
+    t = 1.0f;
+  }
+  return t * t * (3.0f - 2.0f * t);
 }
-void PBR_Directional(
+void ShadeCore(
   const float albedo[3],
   float roughness,
   float metallic,
@@ -36,6 +45,7 @@ void PBR_Directional(
   const float V[3],
   const float L[3],
   const float lightColor[3],
+  float scale,
   float outColor[3]) {
   float nn[3] = { N[0], N[1], N[2] };
   float vv[3] = { V[0], V[1], V[2] };
@@ -103,9 +113,64 @@ void PBR_Directional(
     kd[1] * albedo[1],
     kd[2] * albedo[2]
   };
-  outColor[0] = (diff[0] + spec[0]) * lightColor[0] * cosLi;
-  outColor[1] = (diff[1] + spec[1]) * lightColor[1] * cosLi;
-  outColor[2] = (diff[2] + spec[2]) * lightColor[2] * cosLi;
+  outColor[0] = (diff[0] + spec[0]) * lightColor[0] * cosLi * scale;
+  outColor[1] = (diff[1] + spec[1]) * lightColor[1] * cosLi * scale;
+  outColor[2] = (diff[2] + spec[2]) * lightColor[2] * cosLi * scale;
   (void)Dot3;
+}
+}
+void PBR_Directional(
+  const float albedo[3],
+  float roughness,
+  float metallic,
+  const float N[3],
+  const float V[3],
+  const float L[3],
+  const float lightColor[3],
+  float outColor[3]) {
+  ShadeCore(albedo, roughness, metallic, N, V, L, lightColor, 1.0f, outColor);
+}
+void PBR_Point(
+  const float albedo[3],
+  float roughness,
+  float metallic,
+  const float N[3],
+  const float V[3],
+  const float L[3],
+  float dist,
+  float range,
+  const float lightColor[3],
+  float outColor[3]) {
+  float r = range < 1e-3f ? 1e-3f : range;
+  float q = dist * dist / (r * r);
+  float att = q >= 1.0f ? 0.0f : (1.0f - q) * (1.0f - q);
+  ShadeCore(albedo, roughness, metallic, N, V, L, lightColor, att, outColor);
+}
+void PBR_Spot(
+  const float albedo[3],
+  float roughness,
+  float metallic,
+  const float N[3],
+  const float V[3],
+  const float L[3],
+  float dist,
+  float range,
+  const float spotDir[3],
+  float cosOuter,
+  float falloff,
+  const float lightColor[3],
+  float outColor[3]) {
+  float r = range < 1e-3f ? 1e-3f : range;
+  float q = dist * dist / (r * r);
+  float att = q >= 1.0f ? 0.0f : (1.0f - q) * (1.0f - q);
+  float sd[3] = { spotDir[0], spotDir[1], spotDir[2] };
+  Norm3(sd);
+  float cosT = L[0] * -sd[0] + L[1] * -sd[1] + L[2] * -sd[2];
+  float w = falloff < 0.01f ? 0.01f : falloff;
+  if (w > 0.5f) {
+    w = 0.5f;
+  }
+  float spot = Smooth01(cosOuter, cosOuter + w, cosT);
+  ShadeCore(albedo, roughness, metallic, N, V, L, lightColor, att * spot, outColor);
 }
 }

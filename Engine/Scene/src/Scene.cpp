@@ -13,8 +13,23 @@ void MakeIdentityTransform(Transform& t) {
   t.scale[1] = 1.0f;
   t.scale[2] = 1.0f;
 }
-void ComposeMatrix(const Transform& t, float m[16]) {
-  float rx = t.rotation[0] * 0.01745329252f;
+void MakeDefaultLight(LightData& l) {
+  l.type = static_cast<int>(LightType::Point);
+  l.color[0] = 1.0f;
+  l.color[1] = 1.0f;
+  l.color[2] = 1.0f;
+  l.intensity = 3.0f;
+  l.radius = 10.0f;
+  l.spotAngle = 45.0f;
+  l.falloff = 0.1f;
+  l.castShadow = false;
+  l.lightSize = 0.3f;
+  l.shadowSize = 1024;
+  l.softness = 0.3f;
+  l.cascades = 3;
+  l.lambda = 0.5f;
+}
+void ComposeMatrix(const Transform& t, float m[16]) {  float rx = t.rotation[0] * 0.01745329252f;
   float ry = t.rotation[1] * 0.01745329252f;
   float rz = t.rotation[2] * 0.01745329252f;
   float cx = cosf(rx);
@@ -39,6 +54,30 @@ void ComposeMatrix(const Transform& t, float m[16]) {
   m[4] = r10 * s1; m[5] = r11 * s1; m[6] = r12 * s1; m[7] = 0.0f;
   m[8] = r20 * s2; m[9] = r21 * s2; m[10] = r22 * s2; m[11] = 0.0f;
   m[12] = t.position[0]; m[13] = t.position[1]; m[14] = t.position[2]; m[15] = 1.0f;
+}
+void EntityForward(const Transform& t, float dir[3]) {
+  float rx = t.rotation[0] * 0.01745329252f;
+  float ry = t.rotation[1] * 0.01745329252f;
+  float rz = t.rotation[2] * 0.01745329252f;
+  float sx = sinf(rx);
+  float cx = cosf(rx);
+  float sy = sinf(ry);
+  float cy = cosf(ry);
+  float sz = sinf(rz);
+  float cz = cosf(rz);
+  dir[0] = cx * sy * cz + sx * sz;
+  dir[1] = cx * sy * sz - sx * cz;
+  dir[2] = cx * cy;
+  float l = sqrtf(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
+  if (l < 1e-6f) {
+    dir[0] = 0.0f;
+    dir[1] = 0.0f;
+    dir[2] = 1.0f;
+    return;
+  }
+  dir[0] /= l;
+  dir[1] /= l;
+  dir[2] /= l;
 }
 Scene::Scene()
   : dirty(false) {
@@ -66,6 +105,8 @@ EntityId Scene::CreateEntity(const std::string& name) {
     MakeIdentityTransform(s.entity.transform);
     s.entity.meshGuid.clear();
     s.entity.hasMesh = false;
+    MakeDefaultLight(s.entity.light);
+    s.entity.hasLight = false;
     s.entity.parent = EntityId::Invalid();
     s.entity.children.clear();
     id = s.entity.id;
@@ -78,6 +119,8 @@ EntityId Scene::CreateEntity(const std::string& name) {
     MakeIdentityTransform(s.entity.transform);
     s.entity.meshGuid.clear();
     s.entity.hasMesh = false;
+    MakeDefaultLight(s.entity.light);
+    s.entity.hasLight = false;
     s.entity.parent = EntityId::Invalid();
     slots.push_back(s);
     id = slots.back().entity.id;
