@@ -96,7 +96,7 @@ std::vector<RefUse> EditorApp::SceneMeshRefs() {
   std::vector<EntityId> all = scene.All();
   for (size_t i = 0; i < all.size(); ++i) {
     const Entity* e = scene.Get(all[i]);
-    if (e != nullptr && !e->meshGuid.empty()) {
+    if (e != nullptr && e->hasMesh && !e->meshGuid.empty()) {
       RefUse r;
       r.userLabel = e->name;
       r.assetGuid = e->meshGuid;
@@ -176,7 +176,7 @@ void EditorApp::PumpAssets() {
   std::vector<MeshUse> uses;
   for (size_t i = 0; i < all.size(); ++i) {
     const Entity* e = scene.Get(all[i]);
-    if (e == nullptr || e->meshGuid.empty()) {
+    if (e == nullptr || !e->hasMesh || e->meshGuid.empty()) {
       continue;
     }
     MeshUse u;

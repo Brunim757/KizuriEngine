@@ -133,7 +133,9 @@ bool SaveSceneToFile(const Scene& scene, const std::string& path) {
         std::fprintf(fp, "%s %.9g\n", fd.name.c_str(), v[0]);
       }
     }
-    std::fprintf(fp, "MESH \"%s\"\n", EscapeName(e->meshGuid).c_str());
+    if (e->hasMesh) {
+      std::fprintf(fp, "MESH \"%s\"\n", EscapeName(e->meshGuid).c_str());
+    }
   }
   std::fclose(fp);
   return true;
@@ -168,6 +170,7 @@ bool LoadSceneFromFile(Scene& scene, const std::string& path, LogStore* log) {
     long parentIdx;
     Transform transform;
     std::string meshGuid;
+    bool hasMesh;
   };
   std::vector<PendingEntity> pending;
   PendingEntity* current = nullptr;
@@ -183,6 +186,7 @@ bool LoadSceneFromFile(Scene& scene, const std::string& path, LogStore* log) {
     if (s.compare(0, 7, "ENTITY ") == 0) {
       PendingEntity pe;
       MakeIdentityTransform(pe.transform);
+      pe.hasMesh = false;
       pe.parentIdx = -1;
       size_t pos = 7;
       if (!ParseQuoted(s, pos, pe.name) || pe.name.empty()) {
@@ -206,6 +210,7 @@ bool LoadSceneFromFile(Scene& scene, const std::string& path, LogStore* log) {
           break;
         }
         current->meshGuid = guid;
+        current->hasMesh = true;
         continue;
       }
       const FieldDesc* fd = nullptr;
@@ -260,11 +265,10 @@ bool LoadSceneFromFile(Scene& scene, const std::string& path, LogStore* log) {
       return false;
     }
     scene.SetTransform(id, pending[i].transform);
-    if (!pending[i].meshGuid.empty()) {
-      Entity* createdEntity = scene.Get(id);
-      if (createdEntity != nullptr) {
-        createdEntity->meshGuid = pending[i].meshGuid;
-      }
+    Entity* createdEntity = scene.Get(id);
+    if (createdEntity != nullptr) {
+      createdEntity->meshGuid = pending[i].meshGuid;
+      createdEntity->hasMesh = pending[i].hasMesh;
     }
     created.push_back(id);
   }

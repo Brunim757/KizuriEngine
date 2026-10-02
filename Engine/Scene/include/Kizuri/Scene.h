@@ -24,6 +24,7 @@ struct Entity {
   std::string name;
   Transform transform;
   std::string meshGuid;
+  bool hasMesh;
   EntityId parent;
   std::vector<EntityId> children;
 };

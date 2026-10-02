@@ -64,6 +64,8 @@ EntityId Scene::CreateEntity(const std::string& name) {
     s.entity.id.generation = s.entity.id.generation + 1;
     s.entity.name = finalName;
     MakeIdentityTransform(s.entity.transform);
+    s.entity.meshGuid.clear();
+    s.entity.hasMesh = false;
     s.entity.parent = EntityId::Invalid();
     s.entity.children.clear();
     id = s.entity.id;
@@ -74,6 +76,8 @@ EntityId Scene::CreateEntity(const std::string& name) {
     s.entity.id.generation = 1;
     s.entity.name = finalName;
     MakeIdentityTransform(s.entity.transform);
+    s.entity.meshGuid.clear();
+    s.entity.hasMesh = false;
     s.entity.parent = EntityId::Invalid();
     slots.push_back(s);
     id = slots.back().entity.id;

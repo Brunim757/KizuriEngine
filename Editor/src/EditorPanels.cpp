@@ -69,7 +69,7 @@ void EditorApp::RenderScene() {
     }
     float world[16];
     ComposeMatrix(e->transform, world);
-    if (e->meshGuid.empty()) {
+    if (!e->hasMesh || e->meshGuid.empty()) {
       continue;
     }
     const MeshRecord* rec = assets.GetByGuid(e->meshGuid);
@@ -649,7 +649,29 @@ void EditorApp::DrawInspector() {
       Announce(LogLevel::Warning, "Clipboard empty");
     }
   }
-  DrawMeshSection(e);
+  if (e->hasMesh) {
+    ImGui::Separator();
+    ImGui::Text("Mesh Renderer");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Remove##mesh")) {
+      std::unique_ptr<Command> cmd(new RemoveMeshCmd(e->id));
+      undo.Execute(std::move(cmd), scene);
+    }
+    DrawMeshSection(e);
+  }
+  if (!e->hasMesh) {
+    ImGui::Separator();
+    if (ImGui::Button("Add Component")) {
+      ImGui::OpenPopup("AddComponent");
+    }
+    if (ImGui::BeginPopup("AddComponent")) {
+      if (ImGui::MenuItem("Mesh Renderer")) {
+        std::unique_ptr<Command> cmd(new AddMeshCmd(e->id));
+        undo.Execute(std::move(cmd), scene);
+      }
+      ImGui::EndPopup();
+    }
+  }
   ImGui::End();
 }
 void EditorApp::DrawConsole() {
@@ -716,8 +738,6 @@ void EditorApp::DrawMeshSection(Entity* e) {
   if (e == nullptr) {
     return;
   }
-  ImGui::Separator();
-  ImGui::Text("Mesh Renderer");
   if (e->meshGuid.empty()) {
     ImGui::Text("Mesh: (none)");
   } else {

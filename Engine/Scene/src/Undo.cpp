@@ -26,6 +26,7 @@ bool EntitySnapshot::Capture(const Scene& scene, EntityId root) {
     node.name = e->name;
     node.transform = e->transform;
     node.meshGuid = e->meshGuid;
+    node.hasMesh = e->hasMesh;
     node.parent = par;
     long idx = static_cast<long>(nodes.size());
     nodes.push_back(node);
@@ -47,11 +48,10 @@ EntityId EntitySnapshot::Restore(Scene& scene, EntityId newParent) const {
       return EntityId::Invalid();
     }
     scene.SetTransform(id, nodes[i].transform);
-    if (!nodes[i].meshGuid.empty()) {
-      Entity* createdEntity = scene.Get(id);
-      if (createdEntity != nullptr) {
-        createdEntity->meshGuid = nodes[i].meshGuid;
-      }
+    Entity* createdEntity = scene.Get(id);
+    if (createdEntity != nullptr) {
+      createdEntity->meshGuid = nodes[i].meshGuid;
+      createdEntity->hasMesh = nodes[i].hasMesh;
     }
     created.push_back(id);
   }
@@ -83,6 +83,7 @@ bool CreateEntityCmd::Apply(Scene& scene) {
     Entity* e = scene.Get(live);
     if (e != nullptr) {
       e->meshGuid = mesh;
+      e->hasMesh = true;
     }
   }
   if (useParent.IsValid()) {
@@ -203,6 +204,7 @@ bool SetMeshGuidCmd::Apply(Scene& scene) {
     return false;
   }
   e->meshGuid = after;
+  e->hasMesh = !after.empty();
   scene.MarkDirty();
   return true;
 }
@@ -212,11 +214,69 @@ bool SetMeshGuidCmd::Revert(Scene& scene) {
     return false;
   }
   e->meshGuid = before;
+  e->hasMesh = !before.empty();
   scene.MarkDirty();
   return true;
 }
 const char* SetMeshGuidCmd::Name() const {
   return "Set Mesh";
+}
+AddMeshCmd::AddMeshCmd(EntityId t)
+  : target(t) {
+}
+bool AddMeshCmd::Apply(Scene& scene) {
+  Entity* e = scene.Get(target);
+  if (e == nullptr || e->hasMesh) {
+    return false;
+  }
+  e->hasMesh = true;
+  scene.MarkDirty();
+  return true;
+}
+bool AddMeshCmd::Revert(Scene& scene) {
+  Entity* e = scene.Get(target);
+  if (e == nullptr) {
+    return false;
+  }
+  e->hasMesh = false;
+  e->meshGuid = prevGuid;
+  scene.MarkDirty();
+  return true;
+}
+const char* AddMeshCmd::Name() const {
+  return "Add Mesh";
+}
+RemoveMeshCmd::RemoveMeshCmd(EntityId t)
+  : target(t)
+  , applied(false) {
+}
+bool RemoveMeshCmd::Apply(Scene& scene) {
+  Entity* e = scene.Get(target);
+  if (e == nullptr || !e->hasMesh) {
+    return false;
+  }
+  prevGuid = e->meshGuid;
+  e->hasMesh = false;
+  e->meshGuid.clear();
+  applied = true;
+  scene.MarkDirty();
+  return true;
+}
+bool RemoveMeshCmd::Revert(Scene& scene) {
+  if (!applied) {
+    return false;
+  }
+  Entity* e = scene.Get(target);
+  if (e == nullptr) {
+    return false;
+  }
+  e->hasMesh = true;
+  e->meshGuid = prevGuid;
+  scene.MarkDirty();
+  return true;
+}
+const char* RemoveMeshCmd::Name() const {
+  return "Remove Mesh";
 }
 SetParentCmd::SetParentCmd(EntityId c, EntityId b, EntityId a)
   : child(c)

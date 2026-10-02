@@ -1668,6 +1668,7 @@ bool TestSceneMeshGuid() {
   Kizuri::EntityId a = scene.CreateEntity("WithMesh");
   Kizuri::Entity* e = scene.Get(a);
   e->meshGuid = "guid-abc-123";
+  e->hasMesh = true;
   scene.CreateEntity("NoMesh");
   const char* path = "test_meshguid_tmp.kzscene";
   std::remove(path);
@@ -1694,7 +1695,7 @@ bool TestSceneMeshGuid() {
   if (ra == nullptr || rn == nullptr) {
     return false;
   }
-  return ra->meshGuid == "guid-abc-123" && rn->meshGuid.empty();
+  return ra->meshGuid == "guid-abc-123" && ra->hasMesh && rn->meshGuid.empty() && !rn->hasMesh;
 }
 void WriteTestBMP(const std::string& path, int w, int h, bool withAlpha) {
   int rowBytes = w * 4;
@@ -2140,6 +2141,40 @@ bool TestGltfTextured() {
   fs::remove_all(dir, ec);
   return true;
 }
+bool TestAddRemoveMeshComponent() {
+  Kizuri::Scene scene;
+  Kizuri::UndoStack undo;
+  Kizuri::EntityId a = scene.CreateEntity("A");
+  if (scene.Get(a)->hasMesh) {
+    return false;
+  }
+  std::unique_ptr<Kizuri::Command> add(new Kizuri::AddMeshCmd(a));
+  if (!undo.Execute(std::move(add), scene) || !scene.Get(a)->hasMesh) {
+    return false;
+  }
+  std::unique_ptr<Kizuri::Command> addAgain(new Kizuri::AddMeshCmd(a));
+  if (undo.Execute(std::move(addAgain), scene)) {
+    return false;
+  }
+  std::unique_ptr<Kizuri::Command> set(new Kizuri::SetMeshGuidCmd(a, "", "mesh-9"));
+  if (!undo.Execute(std::move(set), scene)) {
+    return false;
+  }
+  std::unique_ptr<Kizuri::Command> rem(new Kizuri::RemoveMeshCmd(a));
+  if (!undo.Execute(std::move(rem), scene)) {
+    return false;
+  }
+  if (scene.Get(a)->hasMesh || !scene.Get(a)->meshGuid.empty()) {
+    return false;
+  }
+  if (!undo.Undo(scene) || !scene.Get(a)->hasMesh || scene.Get(a)->meshGuid != "mesh-9") {
+    return false;
+  }
+  if (!undo.Redo(scene) || scene.Get(a)->hasMesh) {
+    return false;
+  }
+  return true;
+}
 bool TestSetMeshGuid() {
   Kizuri::Scene scene;
   Kizuri::UndoStack undo;
@@ -2148,10 +2183,16 @@ bool TestSetMeshGuid() {
   if (!undo.Execute(std::move(cmd), scene) || scene.Get(a)->meshGuid != "mesh-1") {
     return false;
   }
+  if (!scene.Get(a)->hasMesh) {
+    return false;
+  }
   if (!scene.IsDirty()) {
     return false;
   }
   if (!undo.Undo(scene) || !scene.Get(a)->meshGuid.empty()) {
+    return false;
+  }
+  if (scene.Get(a)->hasMesh) {
     return false;
   }
   if (!undo.Redo(scene) || scene.Get(a)->meshGuid != "mesh-1") {
@@ -2163,6 +2204,7 @@ bool TestSetMeshGuid() {
   }
   Kizuri::EntityId b = scene.CreateEntity("B");
   scene.Get(b)->meshGuid = "mesh-2";
+  scene.Get(b)->hasMesh = true;
   std::unique_ptr<Kizuri::Command> del(new Kizuri::DeleteEntityCmd(b));
   if (!undo.Execute(std::move(del), scene)) {
     return false;
@@ -2564,6 +2606,7 @@ int main() {
   failures += Check("RHIBuffers", TestRHIBuffers());
   failures += Check("MeshStaging", TestMeshStaging());
   failures += Check("SetMeshGuid", TestSetMeshGuid());
+  failures += Check("AddRemoveMesh", TestAddRemoveMeshComponent());
   failures += Check("DbTextures", TestDbTextures());
   if (failures == 0) {
     std::printf("KizuriHello: all bootstrap libs linked and functional\n");
