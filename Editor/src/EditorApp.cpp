@@ -149,6 +149,12 @@ void EditorApp::PumpAssets() {
   }
   assets.DrainCompleted();
   {
+    std::vector<std::string> errors = assets.TakeImportErrors();
+    for (size_t i = 0; i < errors.size(); ++i) {
+      Announce(LogLevel::Error, std::string("Import failed: ") + errors[i]);
+    }
+  }
+  {
     std::vector<std::string> names = assets.TakeRelocated();
     if (!names.empty()) {
       std::string msg = "Source relocated: ";

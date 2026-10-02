@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cmath>
 #include <filesystem>
+#include <new>
 #include <system_error>
 namespace Kizuri {
 namespace {
@@ -51,14 +52,28 @@ void ImportMeshTask::ExecuteRange(enki::TaskSetPartition range, uint32_t threadn
   result.sourcePath = sourcePath;
   result.meshPath = meshPath;
   if (sourcePath.empty()) {
-    if (DecodeMeshFile(meshPath, result.data) && !result.data.guid.empty()) {
-      result.ok = true;
-      result.sourcePath = meshPath;
+    try {
+      if (DecodeMeshFile(meshPath, result.data) && !result.data.guid.empty()) {
+        result.ok = true;
+        result.sourcePath = meshPath;
+      }
+    } catch (const std::bad_alloc&) {
+      result.error = "out of memory";
+    } catch (...) {
+      result.error = "decode failed";
     }
-  } else if (ImportGltfMesh(sourcePath, keepGuid, result.data, nullptr)) {
-    progress = 60;
-    if (EncodeMeshFile(result.data, meshPath)) {
-      result.ok = true;
+  } else {
+    try {
+      if (ImportGltfMesh(sourcePath, keepGuid, result.data, nullptr)) {
+        progress = 60;
+        if (EncodeMeshFile(result.data, meshPath)) {
+          result.ok = true;
+        }
+      }
+    } catch (const std::bad_alloc&) {
+      result.error = "out of memory";
+    } catch (...) {
+      result.error = "import failed";
     }
   }
   progress = 100;
@@ -171,7 +186,7 @@ void AssetDatabase::Scan() {
     if (known) {
       continue;
     }
-    if (HashPendingForPath(glbFiles[i])) {
+    if (HashPendingForPath(glbFiles[i]) || ImportPendingForPath(glbFiles[i])) {
       continue;
     }
     EnqueueHash(glbFiles[i], "", false);
@@ -208,7 +223,7 @@ void AssetDatabase::Scan() {
     if (known) {
       continue;
     }
-    if (HashPendingForPath(imgFiles[i])) {
+    if (HashPendingForPath(imgFiles[i]) || ImportPendingForPath(imgFiles[i])) {
       continue;
     }
     EnqueueHash(imgFiles[i], "", true);
@@ -291,14 +306,28 @@ void ImportTexTask::ExecuteRange(enki::TaskSetPartition range, uint32_t threadnu
   result.sourcePath = sourcePath;
   result.texPath = texPath;
   if (sourcePath.empty()) {
-    if (DecodeTextureFile(texPath, result.data) && !result.data.guid.empty()) {
-      result.ok = true;
-      result.sourcePath = texPath;
+    try {
+      if (DecodeTextureFile(texPath, result.data) && !result.data.guid.empty()) {
+        result.ok = true;
+        result.sourcePath = texPath;
+      }
+    } catch (const std::bad_alloc&) {
+      result.error = "out of memory";
+    } catch (...) {
+      result.error = "decode failed";
     }
-  } else if (ImportTextureFile(sourcePath, keepGuid, result.data)) {
-    progress = 60;
-    if (EncodeTextureFile(result.data, texPath)) {
-      result.ok = true;
+  } else {
+    try {
+      if (ImportTextureFile(sourcePath, keepGuid, result.data)) {
+        progress = 60;
+        if (EncodeTextureFile(result.data, texPath)) {
+          result.ok = true;
+        }
+      }
+    } catch (const std::bad_alloc&) {
+      result.error = "out of memory";
+    } catch (...) {
+      result.error = "import failed";
     }
   }
   progress = 100;
@@ -386,6 +415,19 @@ void AssetDatabase::EnqueueHash(const std::string& path, const std::string& guid
 bool AssetDatabase::HashPendingForPath(const std::string& path) const {
   for (size_t i = 0; i < pendingHash.size(); ++i) {
     if (pendingHash[i]->path == path) {
+      return true;
+    }
+  }
+  return false;
+}
+bool AssetDatabase::ImportPendingForPath(const std::string& path) const {
+  for (size_t i = 0; i < inflight.size(); ++i) {
+    if (inflight[i] == path) {
+      return true;
+    }
+  }
+  for (size_t i = 0; i < inflightTex.size(); ++i) {
+    if (inflightTex[i] == path) {
       return true;
     }
   }
@@ -512,6 +554,14 @@ size_t AssetDatabase::DrainCompleted() {
   }
   for (size_t i = 0; i < results.size(); ++i) {
     if (!results[i].ok) {
+      if (!results[i].error.empty()) {
+        std::string name = results[i].sourcePath;
+        size_t slash = name.find_last_of("/\\");
+        if (slash != std::string::npos) {
+          name = name.substr(slash + 1);
+        }
+        importErrors.push_back(name + ": " + results[i].error);
+      }
       int64_t ticks = 0;
       if (StatTime(results[i].meshPath, ticks)) {
         failedDecode[results[i].meshPath] = ticks;
@@ -545,6 +595,14 @@ size_t AssetDatabase::DrainCompleted() {
   }
   for (size_t i = 0; i < texResults.size(); ++i) {
     if (!texResults[i].ok) {
+      if (!texResults[i].error.empty()) {
+        std::string name = texResults[i].sourcePath;
+        size_t slash = name.find_last_of("/\\");
+        if (slash != std::string::npos) {
+          name = name.substr(slash + 1);
+        }
+        importErrors.push_back(name + ": " + texResults[i].error);
+      }
       int64_t ticks = 0;
       if (StatTime(texResults[i].texPath, ticks)) {
         failedDecode[texResults[i].texPath] = ticks;
@@ -636,6 +694,9 @@ size_t AssetDatabase::DrainCompleted() {
       if (fi != failedImport.end() && fi->second == smtime) {
         continue;
       }
+    }
+    if (ImportPendingForPath(hr.path)) {
+      continue;
     }
     if (hr.isTex) {
       EnqueueTexImport(hr.path, sib.string(), "");
@@ -860,6 +921,11 @@ size_t AssetDatabase::RelocateMissing() {
 std::vector<std::string> AssetDatabase::TakeRelocated() {
   std::vector<std::string> out = relocated;
   relocated.clear();
+  return out;
+}
+std::vector<std::string> AssetDatabase::TakeImportErrors() {
+  std::vector<std::string> out = importErrors;
+  importErrors.clear();
   return out;
 }
 bool AssetDatabase::RenameAssetFile(const std::string& guid, const std::string& newFileName) {

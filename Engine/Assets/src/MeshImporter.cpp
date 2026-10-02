@@ -185,6 +185,14 @@ bool ImportGltfMesh(const std::string& glbPath, const std::string& keepGuid, Mes
           continue;
         }
         uint32_t baseVertex = static_cast<uint32_t>(out.positions.size() / 3);
+        out.positions.reserve(out.positions.size() + posAcc->count * 3);
+        out.normals.reserve(out.normals.size() + posAcc->count * 3);
+        out.uvs.reserve(out.uvs.size() + posAcc->count * 2);
+        if (prim.indices != nullptr) {
+          out.indices.reserve(out.indices.size() + prim.indices->count);
+        } else {
+          out.indices.reserve(out.indices.size() + posAcc->count);
+        }
         for (size_t vi = 0; vi < posAcc->count && ok; ++vi) {
           float p[3] = { 0, 0, 0 };
           float n[3] = { 0, 1, 0 };
@@ -254,6 +262,8 @@ bool ImportGltfMesh(const std::string& glbPath, const std::string& keepGuid, Mes
                   }
                   TextureAssetData tdata;
                   if (ImportTextureMemory(imgBytes.data(), imgBytes.size(), keepTex, tdata, imgName, false, glbPath, hash)) {
+                    imgBytes.clear();
+                    imgBytes.shrink_to_fit();
                     if (EncodeTextureFile(tdata, texOut)) {
                       md.albedoTexGuid = tdata.guid;
                     }

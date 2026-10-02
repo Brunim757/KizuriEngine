@@ -48,6 +48,7 @@ struct ImportResult {
   std::string meshPath;
   MeshAssetData data;
   std::string warning;
+  std::string error;
 };
 struct ImportMeshTask : public enki::ITaskSet {
   ImportMeshTask();
@@ -86,6 +87,7 @@ struct ImportTexResult {
   std::string sourcePath;
   std::string texPath;
   TextureAssetData data;
+  std::string error;
 };
 struct ImportTexTask : public enki::ITaskSet {
   ImportTexTask();
@@ -141,6 +143,8 @@ public:
   bool Reimport(const std::string& guid);
   size_t RelocateMissing();
   std::vector<std::string> TakeRelocated();
+  std::vector<std::string> TakeImportErrors();
+  std::vector<std::string> TakeImportErrors();
   bool RenameAssetFile(const std::string& guid, const std::string& newFileName);
   bool SetSourcePath(const std::string& guid, const std::string& newSourcePath);
   bool SetTexSourcePath(const std::string& guid, const std::string& newSourcePath);
@@ -184,6 +188,7 @@ private:
   std::mutex completedMutex;
   std::vector<ImportResult> completed;
   std::vector<std::string> relocated;
+  std::vector<std::string> importErrors;
   std::map<std::string, int64_t> seenMeshTime;
   std::map<std::string, std::string> pathToGuid;
   void EnsureJobs();
@@ -192,6 +197,7 @@ private:
   void EnqueueDecode(const std::string& compiledPath, bool isTex);
   void EnqueueHash(const std::string& path, const std::string& guid, bool isTex);
   bool HashPendingForPath(const std::string& path) const;
+  bool ImportPendingForPath(const std::string& path) const;
   bool DecodePendingFor(const std::string& path) const;
   bool SiblingUsable(const std::string& sourcePath, bool isTex) const;
   bool TryReconnectByHash(const std::string& path, uint64_t hash, int64_t fileTime);
