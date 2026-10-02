@@ -11,6 +11,7 @@
 #include "Kizuri/Camera.h"
 #include "Kizuri/MeshLoader.h"
 #include "Kizuri/PBR.h"
+#include "Kizuri/DebugDraw.h"
 #include "Kizuri/DeferredRenderer.h"
 #include "Kizuri/Scene.h"
 #include "Kizuri/MultiSelection.h"
@@ -2357,6 +2358,77 @@ bool TestPBRPointSpot() {
   }
   return true;
 }
+bool TestLightGizmo() {
+  DirectX::XMMATRIX view = DirectX::XMMatrixLookAtLH(DirectX::XMVectorSet(0.0f, 1.5f, -6.0f, 1.0f), DirectX::XMVectorSet(0.0f, 1.5f, 0.0f, 1.0f), DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f));
+  DirectX::XMMATRIX proj = DirectX::XMMatrixPerspectiveFovLH(1.04719755f, 16.0f / 9.0f, 0.1f, 500.0f);
+  DirectX::XMFLOAT4X4 vf;
+  DirectX::XMFLOAT4X4 pf;
+  DirectX::XMStoreFloat4x4(&vf, view);
+  DirectX::XMStoreFloat4x4(&pf, proj);
+  float wpos[3] = { 0.0f, 1.5f, 0.0f };
+  float sx = 0.0f;
+  float sy = 0.0f;
+  if (!Kizuri::ProjectWorldToScreen(&vf.m[0][0], &pf.m[0][0], wpos, 0.0f, 0.0f, 1280.0f, 720.0f, sx, sy)) {
+    return false;
+  }
+  if (std::fabs(sx - 640.0f) > 1.0f || std::fabs(sy - 360.0f) > 1.0f) {
+    return false;
+  }
+  float behind[3] = { 0.0f, 1.5f, -10.0f };
+  if (Kizuri::ProjectWorldToScreen(&vf.m[0][0], &pf.m[0][0], behind, 0.0f, 0.0f, 1280.0f, 720.0f, sx, sy)) {
+    return false;
+  }
+  float c[3] = { 1.0f, 2.0f, 3.0f };
+  float sp[144][3];
+  Kizuri::LightSpherePoints(c, 2.0f, sp);
+  for (int i = 0; i < 144; ++i) {
+    float dx = sp[i][0] - c[0];
+    float dy = sp[i][1] - c[1];
+    float dz = sp[i][2] - c[2];
+    float d = std::sqrt(dx * dx + dy * dy + dz * dz);
+    if (std::fabs(d - 2.0f) > 1e-3f) {
+      return false;
+    }
+  }
+  float apex[3] = { 0.0f, 5.0f, 0.0f };
+  float dir[3] = { 0.0f, -1.0f, 0.0f };
+  float cp[40][3];
+  Kizuri::LightConePoints(apex, dir, 60.0f, 10.0f, cp);
+  if (std::fabs(cp[0][0] - apex[0]) > 1e-4f || std::fabs(cp[0][1] - apex[1]) > 1e-4f || std::fabs(cp[0][2] - apex[2]) > 1e-4f) {
+    return false;
+  }
+  float rimR = std::tan(60.0f * 0.5f * 0.01745329252f) * 10.0f;
+  float rcx = apex[0] + dir[0] * 10.0f;
+  float rcy = apex[1] + dir[1] * 10.0f;
+  float rcz = apex[2] + dir[2] * 10.0f;
+  for (int i = 0; i < 32; i += 2) {
+    float dx = cp[i][0] - rcx;
+    float dy = cp[i][1] - rcy;
+    float dz = cp[i][2] - rcz;
+    if (std::fabs(std::sqrt(dx * dx + dy * dy + dz * dz) - rimR) > 1e-3f) {
+      return false;
+    }
+  }
+  for (int g = 32; g < 40; g += 2) {
+    if (std::fabs(cp[g][0] - apex[0]) > 1e-4f || std::fabs(cp[g][1] - apex[1]) > 1e-4f || std::fabs(cp[g][2] - apex[2]) > 1e-4f) {
+      return false;
+    }
+  }
+  float org[3] = { 0.0f, 0.0f, 0.0f };
+  float dd[3] = { 0.0f, -1.0f, 0.0f };
+  float ap[6][3];
+  Kizuri::LightArrowPoints(org, dd, 3.0f, ap);
+  float tipDx = ap[1][0] - org[0];
+  float tipDy = ap[1][1] - org[1];
+  float tipDz = ap[1][2] - org[2];
+  if (std::fabs(std::sqrt(tipDx * tipDx + tipDy * tipDy + tipDz * tipDz) - 3.0f) > 1e-4f) {
+    return false;
+  }
+  if (!(ap[3][1] > ap[1][1])) {
+    return false;
+  }
+  return true;
+}
 bool TestAddRemoveMeshComponent() {
   Kizuri::Scene scene;
   Kizuri::UndoStack undo;
@@ -2829,6 +2901,7 @@ int main() {
   failures += Check("LightUndo", TestLightUndo());
   failures += Check("EntityForward", TestEntityForward());
   failures += Check("PBR-PointSpot", TestPBRPointSpot());
+  failures += Check("LightGizmo", TestLightGizmo());
   failures += Check("DbTextures", TestDbTextures());
   if (failures == 0) {
     std::printf("KizuriHello: all bootstrap libs linked and functional\n");

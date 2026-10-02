@@ -2,6 +2,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include "EditorApp.h"
 #include "FileDialog.h"
+#include "Kizuri/DebugDraw.h"
 #include "Kizuri/Input.h"
 #include "Kizuri/Picking.h"
 #include <windows.h>
@@ -545,8 +546,57 @@ void EditorApp::DrawViewport() {
     }
     ImGui::EndPopup();
   }
+  DrawLightGizmo();
   vdl->ChannelsMerge();
   ImGui::End();
+}
+void EditorApp::DrawLightGizmo() {
+  if (!selection.HasSelection()) {
+    return;
+  }
+  DirectX::XMMATRIX view = camera.View();
+  float aspect = viewW / viewH;
+  DirectX::XMMATRIX proj = camera.Projection(aspect);
+  DirectX::XMFLOAT4X4 vf;
+  DirectX::XMFLOAT4X4 pf;
+  DirectX::XMStoreFloat4x4(&vf, view);
+  DirectX::XMStoreFloat4x4(&pf, proj);
+  std::vector<EntityId> sel = selection.All();
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  dl->ChannelsSetCurrent(1);
+  float pts[144][3];
+  for (size_t i = 0; i < sel.size(); ++i) {
+    const Entity* e = scene.Get(sel[i]);
+    if (e == nullptr || !e->hasLight) {
+      continue;
+    }
+    float pos[3] = { e->transform.position[0], e->transform.position[1], e->transform.position[2] };
+    float dir[3] = { 0.0f, 0.0f, 1.0f };
+    EntityForward(e->transform, dir);
+    int segs = 0;
+    if (e->light.type == static_cast<int>(LightType::Point)) {
+      LightSpherePoints(pos, e->light.radius, pts);
+      segs = LightSphereSegs;
+    } else if (e->light.type == static_cast<int>(LightType::Spot)) {
+      LightConePoints(pos, dir, e->light.spotAngle, e->light.radius, pts);
+      segs = LightConeSegs;
+    } else if (e->light.type == static_cast<int>(LightType::Directional)) {
+      LightArrowPoints(pos, dir, 3.0f, pts);
+      segs = LightArrowSegs;
+    } else {
+      continue;
+    }
+    for (int s = 0; s < segs; ++s) {
+      float ax = 0.0f;
+      float ay = 0.0f;
+      float bx = 0.0f;
+      float by = 0.0f;
+      if (ProjectWorldToScreen(&vf.m[0][0], &pf.m[0][0], pts[s * 2], viewX, viewY, viewW, viewH, ax, ay) &&
+          ProjectWorldToScreen(&vf.m[0][0], &pf.m[0][0], pts[s * 2 + 1], viewX, viewY, viewW, viewH, bx, by)) {
+        dl->AddLine(ImVec2(ax, ay), ImVec2(bx, by), IM_COL32(255, 210, 60, 255), 1.5f);
+      }
+    }
+  }
 }
 void EditorApp::DrawHierarchy() {
   ImGui::Begin("Hierarchy", &showHierarchy);

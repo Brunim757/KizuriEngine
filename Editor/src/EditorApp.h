@@ -105,6 +105,7 @@ struct EditorApp {
   void Announce(LogLevel level, const std::string& text);
   void DrawAssetBrowser();
   void DrawMeshSection(Entity* e);
+  void DrawLightGizmo();
   std::string ResolveAssetsDir();
   std::vector<RefUse> SceneMeshRefs();
   void PumpAssets();
