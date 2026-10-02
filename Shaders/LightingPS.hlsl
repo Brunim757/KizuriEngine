@@ -138,8 +138,8 @@ float SampleTilePCSS(float3 wpos, row_major float4x4 vp, float tile, float tileK
         return (sp.z - 0.0015 < d0) ? 1.0 : 0.0;
     }
     float us = uvScale;
-    if (perspTanHalf > 0.0) {
-        us = 0.5 * k / (2.0 * perspTanHalf * max(recvDist, 1e-4));
+    if (perspTanHalf > 0.0 && recvDist > 1e-4) {
+        us = 0.5 * k / max(2.0 * perspTanHalf * recvDist, 1e-6);
     }
     float maxR = max(0.25 * k - 4.0 * texel, texel);
     float searchUV = min(effSize * 0.5 * us, maxR);
