@@ -1190,7 +1190,6 @@ bool DeferredRenderer::CreateTargets() {
   fsrOut = rhi->CreateRenderTarget(fw, fh, RHIFormat::RGBA8_UNORM);
   return gAlbedo != 0 && gNormalRough != 0 && gMetallic != 0 && gPosition != 0 && gDepth != 0 && gViewport != 0 && gLight != 0 && bloomA != 0 && bloomB != 0 && fsrA != 0 && fsrOut != 0;
 }
-}
 void DeferredRenderer::DestroyTargets() {
   if (rhi == nullptr) {
     return;
