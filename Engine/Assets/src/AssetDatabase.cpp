@@ -679,15 +679,24 @@ std::vector<std::pair<std::string, int>> AssetDatabase::ImportingNow() const {
   return out;
 }
 void AssetDatabase::DrainBlocking() {
-  for (size_t i = 0; i < pending.size(); ++i) {
-    jobs.WaitForTask(pending[i].get());
+  for (int iter = 0; iter < 50; ++iter) {
+    for (size_t i = 0; i < pending.size(); ++i) {
+      jobs.WaitForTask(pending[i].get());
+    }
+    pending.clear();
+    for (size_t i = 0; i < pendingTex.size(); ++i) {
+      jobs.WaitForTask(pendingTex[i].get());
+    }
+    pendingTex.clear();
+    for (size_t i = 0; i < pendingHash.size(); ++i) {
+      jobs.WaitForTask(pendingHash[i].get());
+    }
+    pendingHash.clear();
+    DrainCompleted();
+    if (PendingImports() == 0) {
+      break;
+    }
   }
-  pending.clear();
-  for (size_t i = 0; i < pendingTex.size(); ++i) {
-    jobs.WaitForTask(pendingTex[i].get());
-  }
-  pendingTex.clear();
-  DrainCompleted();
 }
 void AssetDatabase::InitFreshMeshState(MeshRecord& record) {
   record.lastSeenSourceTime = 0;
