@@ -1215,18 +1215,3 @@ void EditorApp::DrawAssetBrowser() {
   ImGui::End();
 }
 }
-      }
-      Announce(LogLevel::Warning, "Asset force deleted");
-      forceDeleteGuid.clear();
-      ImGui::CloseCurrentPopup();
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Cancel")) {
-      forceDeleteGuid.clear();
-      ImGui::CloseCurrentPopup();
-    }
-    ImGui::EndPopup();
-  }
-  ImGui::End();
-}
-}
