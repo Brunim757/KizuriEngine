@@ -303,6 +303,24 @@ public:
     (void)sampler;
     Note(false);
   }
+  RHIRenderTarget CreateShadowCube(int size) override {
+    if (size <= 0) {
+      return 0;
+    }
+    uint64_t id = nextId++;
+    targets[id] = static_cast<int>(RHIFormat::R32_DEPTH);
+    return id;
+  }
+  void SetShadowCubeFace(RHIRenderTarget cube, int face) override {
+    (void)cube;
+    (void)face;
+    Note(false);
+  }
+  RHISampler CreateSamplerShadow() override {
+    uint64_t id = nextId++;
+    shaders[id] = 1;
+    return id;
+  }
   RHITexture CreateTexture2D(int tw, int th, int mipLevels, RHITextureFormat fmt) override {
     if (tw <= 0 || th <= 0 || mipLevels <= 0 || mipLevels > 16) {
       return 0;

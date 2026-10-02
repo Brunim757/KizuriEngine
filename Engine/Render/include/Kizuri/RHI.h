@@ -8,7 +8,8 @@ enum class RHI_API {
 enum class RHIFormat {
   RGBA8_UNORM,
   RGBA16F,
-  D24S8
+  D24S8,
+  R32_DEPTH
 };
 enum class RHITopology {
   TriangleList
@@ -49,6 +50,7 @@ struct RHIRasterizer {
   RHICull cull;
   RHIFill fill;
   bool frontCCW;
+  float slopeBias;
 };
 struct RHIDepthStencil {
   bool depthEnable;
@@ -111,6 +113,9 @@ public:
   virtual void SetPixelTexture(uint32_t slot, RHIRenderTarget rt) = 0;
   virtual RHISampler CreateSamplerLinear() = 0;
   virtual void SetPixelSampler(uint32_t slot, RHISampler sampler) = 0;
+  virtual RHIRenderTarget CreateShadowCube(int size) = 0;
+  virtual void SetShadowCubeFace(RHIRenderTarget cube, int face) = 0;
+  virtual RHISampler CreateSamplerShadow() = 0;
   virtual RHITexture CreateTexture2D(int w, int h, int mipLevels, RHITextureFormat fmt) = 0;
   virtual bool UpdateTextureMip(RHITexture tex, int mip, int w, int h, uint32_t rowPitch, const void* data, size_t bytes) = 0;
   virtual void DestroyTexture(RHITexture tex) = 0;

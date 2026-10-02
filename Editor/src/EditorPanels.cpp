@@ -51,6 +51,25 @@ void EditorApp::RenderScene() {
   float cpos[3] = { cpx, cpy, cpz };
   renderer.BeginObjects(&vf.m[0][0], &pf.m[0][0]);
   renderer.ClearLights();
+  ShadowCameraSetup shadowCam;
+  shadowCam.camPos[0] = cpx;
+  shadowCam.camPos[1] = cpy;
+  shadowCam.camPos[2] = cpz;
+  shadowCam.camFwd[0] = vf.m[2][0];
+  shadowCam.camFwd[1] = vf.m[2][1];
+  shadowCam.camFwd[2] = vf.m[2][2];
+  shadowCam.camRight[0] = vf.m[0][0];
+  shadowCam.camRight[1] = vf.m[0][1];
+  shadowCam.camRight[2] = vf.m[0][2];
+  shadowCam.camUp[0] = vf.m[1][0];
+  shadowCam.camUp[1] = vf.m[1][1];
+  shadowCam.camUp[2] = vf.m[1][2];
+  shadowCam.fovY = camera.fovY;
+  shadowCam.aspect = aspect;
+  shadowCam.nearZ = camera.nearZ;
+  shadowCam.farZ = camera.farZ;
+  renderer.SetShadowCamera(shadowCam);
+  renderer.SetShadowDebug(debugCascades);
   std::vector<EntityId> lightIds = scene.All();
   for (size_t i = 0; i < lightIds.size(); ++i) {
     const Entity* e = scene.Get(lightIds[i]);
@@ -67,6 +86,8 @@ void EditorApp::RenderScene() {
       pl.color[2] = e->light.color[2];
       pl.intensity = e->light.intensity;
       pl.radius = e->light.radius;
+      pl.castShadow = e->light.castShadow;
+      pl.effectiveSize = e->light.softness * e->light.lightSize;
       renderer.AddPointLight(pl);
     } else if (e->light.type == static_cast<int>(LightType::Spot)) {
       RenderSpotLight sl;
@@ -81,6 +102,9 @@ void EditorApp::RenderScene() {
       sl.radius = e->light.radius;
       sl.angle = e->light.spotAngle;
       sl.falloff = e->light.falloff;
+      sl.castShadow = e->light.castShadow;
+      sl.effectiveSize = e->light.softness * e->light.lightSize;
+      sl.shadowSize = e->light.shadowSize;
       renderer.AddSpotLight(sl);
     } else if (e->light.type == static_cast<int>(LightType::Directional)) {
       RenderDirectionalLight dl;
@@ -89,6 +113,11 @@ void EditorApp::RenderScene() {
       dl.color[1] = e->light.color[1];
       dl.color[2] = e->light.color[2];
       dl.intensity = e->light.intensity;
+      dl.castShadow = e->light.castShadow;
+      dl.effectiveSize = e->light.softness * e->light.lightSize;
+      dl.shadowSize = e->light.shadowSize;
+      dl.cascades = e->light.cascades;
+      dl.lambda = e->light.lambda;
       renderer.AddDirectionalLight(dl);
     }
   }
@@ -230,6 +259,8 @@ void EditorApp::DrawViewport() {
   if (ImGui::RadioButton("Scale", curOp == ImGuizmo::SCALE)) {
     gizmoOp = static_cast<int>(ImGuizmo::SCALE);
   }
+  ImGui::SameLine();
+  ImGui::Checkbox("Debug CSM", &debugCascades);
   if (ImGui::IsWindowHovered() && !ImGui::GetIO().WantTextInput && !RawInputPoll::IsMouseDown(VK_RBUTTON)) {
     if (ImGui::IsKeyPressed(ImGuiKey_W, false)) {
       gizmoOp = static_cast<int>(ImGuizmo::TRANSLATE);

@@ -18,6 +18,8 @@ struct RenderPointLight {
   float color[3];
   float intensity;
   float radius;
+  bool castShadow;
+  float effectiveSize;
 };
 struct RenderSpotLight {
   float pos[3];
@@ -27,11 +29,36 @@ struct RenderSpotLight {
   float radius;
   float angle;
   float falloff;
+  bool castShadow;
+  float effectiveSize;
+  int shadowSize;
 };
 struct RenderDirectionalLight {
   float dir[3];
   float color[3];
   float intensity;
+  bool castShadow;
+  float effectiveSize;
+  int shadowSize;
+  int cascades;
+  float lambda;
+};
+struct ShadowCameraSetup {
+  float camPos[3];
+  float camFwd[3];
+  float camRight[3];
+  float camUp[3];
+  float fovY;
+  float aspect;
+  float nearZ;
+  float farZ;
+};
+struct ShadowDrawItem {
+  float world[16];
+  RHIBuffer vb;
+  RHIBuffer ib;
+  uint32_t start;
+  uint32_t count;
 };
 class DeferredRenderer {
 public:
@@ -46,6 +73,8 @@ public:
   void AddPointLight(const RenderPointLight& light);
   void AddSpotLight(const RenderSpotLight& light);
   void AddDirectionalLight(const RenderDirectionalLight& light);
+  void SetShadowCamera(const ShadowCameraSetup& setup);
+  void SetShadowDebug(bool debug);
   bool Resize(int w, int h);
   void SetViewOffset(float x, float y);
   void Render(const float view[16], const float proj[16], const float camPos[3]);
@@ -76,6 +105,33 @@ private:
   RHIPixelShader geoPS;
   RHIVertexShader lightVS;
   RHIPixelShader lightPS;
+  RHIVertexShader depthVS;
+  RHIRenderTarget shadowAtlas;
+  RHIRenderTarget shadowCube;
+  RHISampler shadowSampler;
+  bool shadowsAvailable;
+  bool shadowDebug;
+  bool shadowMapsValid;
+  ShadowCameraSetup shadowCam;
+  float shadowCascadeVP[4][16];
+  float shadowCascadeSplit[4];
+  float shadowCascadeNear[4];
+  float shadowCascadeFar[4];
+  float shadowCascadeUV[4];
+  float shadowCascadeK[4];
+  float shadowCascadeSize[4];
+  float shadowCascadeLight[4];
+  int shadowCascadeActive;
+  float shadowSpotVP[4][16];
+  float shadowSpotMeta[4][4];
+  int shadowSpotActive;
+  float shadowPointPos[3];
+  float shadowPointFar;
+  float shadowPointNear;
+  float shadowPointSize;
+  int shadowPointLight;
+  bool shadowPointActive;
+  std::vector<ShadowDrawItem> shadowDraws;
   RHIInputLayout layout;
   RHISampler sampler;
   uint32_t indexCount;
@@ -92,6 +148,7 @@ private:
   std::vector<RenderDirectionalLight> dirLights;
   bool CreateTargets();
   void DestroyTargets();
+  void RenderShadowMaps();
   void RenderInternal(const float view[16], const float proj[16], const float camPos[3], bool toTexture);
   void EndInternal(const float camPos[3], bool toTexture);
   DeferredRenderer(const DeferredRenderer&) = delete;

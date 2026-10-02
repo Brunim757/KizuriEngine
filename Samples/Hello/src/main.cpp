@@ -12,6 +12,7 @@
 #include "Kizuri/MeshLoader.h"
 #include "Kizuri/PBR.h"
 #include "Kizuri/DebugDraw.h"
+#include "Kizuri/Shadows.h"
 #include "Kizuri/DeferredRenderer.h"
 #include "Kizuri/Scene.h"
 #include "Kizuri/MultiSelection.h"
@@ -36,6 +37,18 @@
 #include <cmath>
 #include <cstring>
 #include <atomic>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <d3dcompiler.h>
+#undef small
+#undef far
+#undef near
+#endif
 namespace {
 int Check(const char* name, bool ok) {
   std::printf("[%s] %s\n", ok ? "PASS" : "FAIL", name);
@@ -233,6 +246,7 @@ bool TestStateCache() {
   rs.cull = Kizuri::RHICull::Back;
   rs.fill = Kizuri::RHIFill::Solid;
   rs.frontCCW = false;
+  rs.slopeBias = 0.0f;
   rhi->SetRasterizerState(rs);
   rhi->SetRasterizerState(rs);
   rhi->SetRasterizerState(rs);
@@ -314,10 +328,10 @@ bool TestPBR() {
 }
 bool TestShaderFiles() {
   const char* dirs[3] = { "Shaders", "Samples/../Shaders", "build/bin/Release/Shaders" };
-  const char* files[4] = { "GeometryVS.hlsl", "GeometryPS.hlsl", "LightingVS.hlsl", "LightingPS.hlsl" };
+  const char* files[5] = { "GeometryVS.hlsl", "GeometryPS.hlsl", "LightingVS.hlsl", "LightingPS.hlsl", "DepthVS.hlsl" };
   for (int d = 0; d < 3; ++d) {
     bool allOk = true;
-    for (int f = 0; f < 4; ++f) {
+    for (int f = 0; f < 5; ++f) {
       char path[512];
       std::snprintf(path, sizeof(path), "%s/%s", dirs[d], files[f]);
       FILE* fp = std::fopen(path, "rb");
@@ -2426,6 +2440,215 @@ bool TestLightGizmo() {
   }
   return true;
 }
+bool TestShaderCompile() {
+#ifdef _WIN32
+  struct Entry {
+    const char* file;
+    const char* profile;
+  };
+  Entry entries[5] = {
+    { "GeometryVS.hlsl", "vs_5_0" },
+    { "GeometryPS.hlsl", "ps_5_0" },
+    { "LightingVS.hlsl", "vs_5_0" },
+    { "LightingPS.hlsl", "ps_5_0" },
+    { "DepthVS.hlsl", "vs_5_0" }
+  };
+  const char* dirs[4] = { "Shaders", "../Shaders", "../../Shaders", "build/bin/Release/Shaders" };
+  for (int e = 0; e < 5; ++e) {
+    bool found = false;
+    for (int d = 0; d < 4; ++d) {
+      std::string path = std::string(dirs[d]) + "/" + entries[e].file;
+      if (!std::filesystem::exists(path)) {
+        continue;
+      }
+      wchar_t wpath[512];
+      size_t conv = 0;
+      if (mbstowcs_s(&conv, wpath, 512, path.c_str(), _TRUNCATE) != 0) {
+        return false;
+      }
+      ID3DBlob* code = nullptr;
+      ID3DBlob* errs = nullptr;
+      HRESULT hr = D3DCompileFromFile(wpath, nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, "main", entries[e].profile, D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_WARNINGS_ARE_ERRORS, 0, &code, &errs);
+      if (errs != nullptr) {
+        std::printf("%s: %s\n", path.c_str(), static_cast<const char*>(errs->GetBufferPointer()));
+        errs->Release();
+      }
+      if (code != nullptr) {
+        code->Release();
+      }
+      found = true;
+      if (FAILED(hr)) {
+        return false;
+      }
+    }
+    if (!found) {
+      return false;
+    }
+  }
+#endif
+  return true;
+}
+bool TestShadowSplits() {
+  float s[5] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+  Kizuri::ShadowSplitDepths(1.0f, 100.0f, 3, 0.5f, s);
+  if (s[0] != 1.0f || s[3] != 100.0f) {
+    return false;
+  }
+  if (!(s[0] < s[1] && s[1] < s[2] && s[2] < s[3])) {
+    return false;
+  }
+  float logMid = 1.0f * std::pow(100.0f, 1.0f / 3.0f);
+  float uniMid = 1.0f + 99.0f / 3.0f;
+  if (std::fabs(s[1] - (0.5f * logMid + 0.5f * uniMid)) > 0.01f) {
+    return false;
+  }
+  float u[5] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+  Kizuri::ShadowSplitDepths(1.0f, 100.0f, 2, 0.0f, u);
+  if (std::fabs(u[1] - 50.5f) > 0.01f) {
+    return false;
+  }
+  return true;
+}
+bool TestShadowSunMatrix() {
+  float sunDir[3] = { 0.4f, -1.0f, 0.3f };
+  float camPos[3] = { 0.0f, 5.0f, -10.0f };
+  float camFwd[3] = { 0.0f, -0.4f, 0.9f };
+  float camRight[3] = { 1.0f, 0.0f, 0.0f };
+  float camUp[3] = { 0.0f, 0.9f, 0.4f };
+  float vp[16];
+  float cn = 0.0f;
+  float cf = 0.0f;
+  float ce = 0.0f;
+  Kizuri::ShadowSunMatrix(sunDir, camPos, camFwd, camRight, camUp, 1.047f, 1.7f, 1.0f, 50.0f, 2048, vp, cn, cf, ce);
+  if (!(cn > 0.0f && cf > cn && ce > 0.0f)) {
+    return false;
+  }
+  float corners[8][3];
+  Kizuri::ShadowFrustumCorners(camPos, camFwd, camRight, camUp, 1.047f, 1.7f, 1.0f, 50.0f, corners);
+  for (int i = 0; i < 8; ++i) {
+    float x = corners[i][0];
+    float y = corners[i][1];
+    float z = corners[i][2];
+    float w = vp[3] * x + vp[7] * y + vp[11] * z + vp[15];
+    if (std::fabs(w) < 1e-6f) {
+      return false;
+    }
+    float nx = (vp[0] * x + vp[4] * y + vp[8] * z + vp[12]) / w;
+    float ny = (vp[1] * x + vp[5] * y + vp[9] * z + vp[13]) / w;
+    float nz = (vp[2] * x + vp[6] * y + vp[10] * z + vp[14]) / w;
+    if (nx < -1.01f || nx > 1.01f || ny < -1.01f || ny > 1.01f || nz < -0.01f || nz > 1.01f) {
+      return false;
+    }
+  }
+  return true;
+}
+bool TestShadowAtlasPlan() {
+  int dc[2] = { 3, 2 };
+  Kizuri::ShadowAtlasPlan full = Kizuri::PlanShadowAtlas(dc, 2, 2);
+  if (full.dirTileStart[0] != 0 || full.dirTileStart[1] != -1) {
+    return false;
+  }
+  if (full.spotMapped != 1 || full.spotTiles[0] != 3) {
+    return false;
+  }
+  int one[1] = { 2 };
+  Kizuri::ShadowAtlasPlan part = Kizuri::PlanShadowAtlas(one, 1, 3);
+  if (part.dirTileStart[0] != 0) {
+    return false;
+  }
+  if (part.spotMapped != 2 || part.spotTiles[0] != 2 || part.spotTiles[1] != 3) {
+    return false;
+  }
+  Kizuri::ShadowAtlasPlan none = Kizuri::PlanShadowAtlas(nullptr, 0, 5);
+  if (none.dirTileStart[0] != -1 || none.spotMapped != 4) {
+    return false;
+  }
+  float u = 0.0f;
+  float v = 0.0f;
+  Kizuri::ShadowTileUV(-1.0f, 1.0f, 0, 1.0f, u, v);
+  if (std::fabs(u) > 1e-5f || std::fabs(v) > 1e-5f) {
+    return false;
+  }
+  Kizuri::ShadowTileUV(1.0f, -1.0f, 3, 1.0f, u, v);
+  if (std::fabs(u - 1.0f) > 1e-5f || std::fabs(v - 1.0f) > 1e-5f) {
+    return false;
+  }
+  Kizuri::ShadowTileUV(1.0f, 1.0f, 0, 0.5f, u, v);
+  if (std::fabs(u - 0.25f) > 1e-5f || std::fabs(v) > 1e-5f) {
+    return false;
+  }
+  return true;
+}
+bool TestShadowSpotPoint() {
+  float pos[3] = { 0.0f, 8.0f, 0.0f };
+  float dir[3] = { 0.0f, -1.0f, 0.0f };
+  float vp[16];
+  Kizuri::ShadowSpotMatrix(pos, dir, 60.0f, 20.0f, vp);
+  float tx = 0.0f;
+  float ty = 4.0f;
+  float tz = 0.0f;
+  float w = vp[3] * tx + vp[7] * ty + vp[11] * tz + vp[15];
+  float nx = (vp[0] * tx + vp[4] * ty + vp[8] * tz + vp[12]) / w;
+  float ny = (vp[1] * tx + vp[5] * ty + vp[9] * tz + vp[13]) / w;
+  float nz = (vp[2] * tx + vp[6] * ty + vp[10] * tz + vp[14]) / w;
+  if (std::fabs(nx) > 0.01f || std::fabs(ny) > 0.01f || nz < 0.0f || nz > 1.0f) {
+    return false;
+  }
+  float faces[6][16];
+  float ppos[3] = { 5.0f, 3.0f, 5.0f };
+  Kizuri::ShadowPointFaces(ppos, 15.0f, faces);
+  float dirs[6][3] = {
+    { 1.0f, 0.0f, 0.0f }, { -1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f, 0.0f },
+    { 0.0f, -1.0f, 0.0f }, { 0.0f, 0.0f, 1.0f }, { 0.0f, 0.0f, -1.0f }
+  };
+  for (int f = 0; f < 6; ++f) {
+    float qx = ppos[0] + dirs[f][0] * 5.0f;
+    float qy = ppos[1] + dirs[f][1] * 5.0f;
+    float qz = ppos[2] + dirs[f][2] * 5.0f;
+    float* m = faces[f];
+    float ww = m[3] * qx + m[7] * qy + m[11] * qz + m[15];
+    if (std::fabs(ww) < 1e-6f) {
+      return false;
+    }
+    float qnx = (m[0] * qx + m[4] * qy + m[8] * qz + m[12]) / ww;
+    float qny = (m[1] * qx + m[5] * qy + m[9] * qz + m[13]) / ww;
+    if (std::fabs(qnx) > 0.05f || std::fabs(qny) > 0.05f) {
+      return false;
+    }
+  }
+  if (std::fabs(Kizuri::ShadowLinearizeDepth(0.0f, 0.5f, 15.0f) - 0.5f) > 1e-4f) {
+    return false;
+  }
+  if (std::fabs(Kizuri::ShadowLinearizeDepth(1.0f, 0.5f, 15.0f) - 15.0f) > 1e-3f) {
+    return false;
+  }
+  return true;
+}
+bool TestPCSSMath() {
+  if (Kizuri::PCSSPenumbraWidth(10.0f, 10.0f, 0.5f) != 0.0f) {
+    return false;
+  }
+  if (Kizuri::PCSSPenumbraWidth(10.0f, 5.0f, 0.0f) != 0.0f) {
+    return false;
+  }
+  if (Kizuri::PCSSPenumbraWidth(5.0f, 10.0f, 0.5f) != 0.0f) {
+    return false;
+  }
+  if (std::fabs(Kizuri::PCSSPenumbraWidth(10.0f, 5.0f, 0.5f) - 0.5f) > 1e-5f) {
+    return false;
+  }
+  if (std::fabs(Kizuri::PCSSOrthoUVScale(20.0f, 1.0f) - 0.0125f) > 1e-6f) {
+    return false;
+  }
+  if (Kizuri::PCSSOrthoUVScale(0.0f, 1.0f) != 0.0f) {
+    return false;
+  }
+  float puv = Kizuri::PCSSPerspUVScale(0.5f, 10.0f, 1.0f);
+  if (std::fabs(puv - 0.05f) > 1e-6f) {
+    return false;
+  }
+  return true;
+}
 bool TestAddRemoveMeshComponent() {
   Kizuri::Scene scene;
   Kizuri::UndoStack undo;
@@ -2899,6 +3122,12 @@ int main() {
   failures += Check("EntityForward", TestEntityForward());
   failures += Check("PBR-PointSpot", TestPBRPointSpot());
   failures += Check("LightGizmo", TestLightGizmo());
+  failures += Check("ShaderCompile", TestShaderCompile());
+  failures += Check("ShadowSplits", TestShadowSplits());
+  failures += Check("ShadowSunMatrix", TestShadowSunMatrix());
+  failures += Check("ShadowAtlasPlan", TestShadowAtlasPlan());
+  failures += Check("ShadowSpotPoint", TestShadowSpotPoint());
+  failures += Check("PCSSMath", TestPCSSMath());
   failures += Check("DbTextures", TestDbTextures());
   if (failures == 0) {
     std::printf("KizuriHello: all bootstrap libs linked and functional\n");

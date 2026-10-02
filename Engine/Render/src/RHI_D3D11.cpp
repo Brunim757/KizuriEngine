@@ -87,6 +87,12 @@ struct TargetRes {
   RHIFormat fmt = RHIFormat::RGBA8_UNORM;
   bool isDepth = false;
 };
+struct ShadowCubeRes {
+  ComPtr<ID3D11Texture2D> tex;
+  ComPtr<ID3D11DepthStencilView> dsv[6];
+  ComPtr<ID3D11ShaderResourceView> srv;
+  int size = 0;
+};
 }
 class D3D11RHI : public IRHI {
 public:
@@ -106,6 +112,7 @@ public:
     curRS.cull = RHICull::Back;
     curRS.fill = RHIFill::Solid;
     curRS.frontCCW = false;
+    curRS.slopeBias = 0.0f;
     curDS.depthEnable = true;
     curDS.depthWrite = true;
     curBlend.enable = false;
@@ -191,6 +198,9 @@ public:
     targets.clear();
     samplers.clear();
     layouts.clear();
+    cubes.clear();
+    lastCube = 0;
+    lastCubeFace = -1;
     vsBlobs.clear();
     vsMap.clear();
     psMap.clear();
@@ -552,7 +562,7 @@ public:
     context->IASetPrimitiveTopology(d3dTopo);
   }
   void SetRasterizerState(const RHIRasterizer& rs) override {
-    if (hasRS && curRS.cull == rs.cull && curRS.fill == rs.fill && curRS.frontCCW == rs.frontCCW) {
+    if (hasRS && curRS.cull == rs.cull && curRS.fill == rs.fill && curRS.frontCCW == rs.frontCCW && curRS.slopeBias == rs.slopeBias) {
       Note(true);
       return;
     }
@@ -571,7 +581,7 @@ public:
     d.FrontCounterClockwise = rs.frontCCW ? TRUE : FALSE;
     d.DepthBias = 0;
     d.DepthBiasClamp = 0.0f;
-    d.SlopeScaledDepthBias = 0.0f;
+    d.SlopeScaledDepthBias = rs.slopeBias;
     d.DepthClipEnable = TRUE;
     d.ScissorEnable = FALSE;
     d.MultisampleEnable = FALSE;
@@ -648,7 +658,7 @@ public:
     res.w = tw;
     res.h = th;
     res.fmt = fmt;
-    res.isDepth = (fmt == RHIFormat::D24S8);
+    res.isDepth = (fmt == RHIFormat::D24S8 || fmt == RHIFormat::R32_DEPTH);
     D3D11_TEXTURE2D_DESC td;
     td.Width = static_cast<UINT>(tw);
     td.Height = static_cast<UINT>(th);
@@ -661,12 +671,36 @@ public:
     td.CPUAccessFlags = 0;
     td.MiscFlags = 0;
     if (res.isDepth) {
-      td.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+      if (fmt == RHIFormat::R32_DEPTH) {
+        td.Format = DXGI_FORMAT_R32_TYPELESS;
+        td.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+      } else {
+        td.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+      }
       if (FAILED(device->CreateTexture2D(&td, nullptr, res.tex.GetAddressOf()))) {
         return 0;
       }
-      if (FAILED(device->CreateDepthStencilView(res.tex.Get(), nullptr, res.dsv.GetAddressOf()))) {
-        return 0;
+      if (fmt == RHIFormat::R32_DEPTH) {
+        D3D11_DEPTH_STENCIL_VIEW_DESC dd;
+        dd.Format = DXGI_FORMAT_D32_FLOAT;
+        dd.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+        dd.Flags = 0;
+        dd.Texture2D.MipSlice = 0;
+        if (FAILED(device->CreateDepthStencilView(res.tex.Get(), &dd, res.dsv.GetAddressOf()))) {
+          return 0;
+        }
+        D3D11_SHADER_RESOURCE_VIEW_DESC sd;
+        sd.Format = DXGI_FORMAT_R32_FLOAT;
+        sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        sd.Texture2D.MostDetailedMip = 0;
+        sd.Texture2D.MipLevels = 1;
+        if (FAILED(device->CreateShaderResourceView(res.tex.Get(), &sd, res.srv.GetAddressOf()))) {
+          return 0;
+        }
+      } else {
+        if (FAILED(device->CreateDepthStencilView(res.tex.Get(), nullptr, res.dsv.GetAddressOf()))) {
+          return 0;
+        }
       }
     } else {
       td.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
@@ -686,6 +720,11 @@ public:
   }
   void DestroyRenderTarget(RHIRenderTarget rt) override {
     targets.erase(rt);
+    cubes.erase(rt);
+    if (lastCube == rt) {
+      lastCube = 0;
+      lastCubeFace = -1;
+    }
   }
   void SetRenderTargets(uint32_t count, const RHIRenderTarget* colorRTs, RHIRenderTarget depthRT) override {
     bool same = (curRTs.size() == count && curDepth == depthRT);
@@ -704,6 +743,8 @@ public:
     Note(false);
     curRTs.assign(colorRTs, colorRTs + count);
     curDepth = depthRT;
+    lastCube = 0;
+    lastCubeFace = -1;
     ID3D11RenderTargetView* rtvs[4] = { nullptr, nullptr, nullptr, nullptr };
     uint32_t n = count > 4 ? 4 : count;
     for (uint32_t i = 0; i < n; ++i) {
@@ -742,17 +783,27 @@ public:
   }
   void ClearDepth(RHIRenderTarget depthRT) override {
     auto it = targets.find(depthRT);
-    if (it == targets.end() || it->second.dsv == nullptr) {
+    if (it != targets.end() && it->second.dsv != nullptr) {
+      context->ClearDepthStencilView(it->second.dsv.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
       return;
     }
-    context->ClearDepthStencilView(it->second.dsv.Get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0f, 0);
+    if (depthRT == lastCube && lastCubeFace >= 0 && lastCubeFace < 6) {
+      auto cit = cubes.find(depthRT);
+      if (cit != cubes.end() && cit->second.dsv[lastCubeFace] != nullptr) {
+        context->ClearDepthStencilView(cit->second.dsv[lastCubeFace].Get(), D3D11_CLEAR_DEPTH, 1.0f, 0);
+      }
+    }
   }
   void* GetRenderTargetSRV(RHIRenderTarget rt) const override {
     auto it = targets.find(rt);
-    if (it == targets.end()) {
-      return nullptr;
+    if (it != targets.end()) {
+      return it->second.srv.Get();
     }
-    return it->second.srv.Get();
+    auto cit = cubes.find(rt);
+    if (cit != cubes.end()) {
+      return cit->second.srv.Get();
+    }
+    return nullptr;
   }
   void BindBackbuffer() override {
     bool same = (curRTs.size() == 1 && curRTs[0] == backId && curDepth == 0);
@@ -764,6 +815,8 @@ public:
     curRTs.clear();
     curRTs.push_back(backId);
     curDepth = 0;
+    lastCube = 0;
+    lastCubeFace = -1;
     ID3D11RenderTargetView* rtv = backRTV.Get();
     context->OMSetRenderTargets(1, &rtv, nullptr);
     D3D11_VIEWPORT vp;
@@ -781,8 +834,16 @@ public:
       context->PSSetShaderResources(slot, 1, &nullSrv);
       return;
     }
+    ID3D11ShaderResourceView* srv = nullptr;
     auto it = targets.find(rt);
-    ID3D11ShaderResourceView* srv = (it == targets.end()) ? nullptr : it->second.srv.Get();
+    if (it != targets.end()) {
+      srv = it->second.srv.Get();
+    } else {
+      auto cit = cubes.find(rt);
+      if (cit != cubes.end()) {
+        srv = cit->second.srv.Get();
+      }
+    }
     context->PSSetShaderResources(slot, 1, &srv);
   }
   RHISampler CreateSamplerLinear() override {
@@ -798,6 +859,91 @@ public:
     sd.BorderColor[1] = 0.0f;
     sd.BorderColor[2] = 0.0f;
     sd.BorderColor[3] = 0.0f;
+    sd.MinLOD = 0.0f;
+    sd.MaxLOD = D3D11_FLOAT32_MAX;
+    ComPtr<ID3D11SamplerState> sampler;
+    if (FAILED(device->CreateSamplerState(&sd, sampler.GetAddressOf()))) {
+      return 0;
+    }
+    uint64_t id = nextId++;
+    samplers[id] = sampler;
+    return id;
+  }
+  RHIRenderTarget CreateShadowCube(int size) override {
+    if (size <= 0) {
+      return 0;
+    }
+    ShadowCubeRes res;
+    res.size = size;
+    D3D11_TEXTURE2D_DESC td;
+    td.Width = static_cast<UINT>(size);
+    td.Height = static_cast<UINT>(size);
+    td.MipLevels = 1;
+    td.ArraySize = 6;
+    td.Format = DXGI_FORMAT_R32_TYPELESS;
+    td.SampleDesc.Count = 1;
+    td.SampleDesc.Quality = 0;
+    td.Usage = D3D11_USAGE_DEFAULT;
+    td.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+    td.CPUAccessFlags = 0;
+    td.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE;
+    if (FAILED(device->CreateTexture2D(&td, nullptr, res.tex.GetAddressOf()))) {
+      return 0;
+    }
+    for (int f = 0; f < 6; ++f) {
+      D3D11_DEPTH_STENCIL_VIEW_DESC dd;
+      dd.Format = DXGI_FORMAT_D32_FLOAT;
+      dd.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2DARRAY;
+      dd.Flags = 0;
+      dd.Texture2DArray.MipSlice = 0;
+      dd.Texture2DArray.FirstArraySlice = static_cast<UINT>(f);
+      dd.Texture2DArray.ArraySize = 1;
+      if (FAILED(device->CreateDepthStencilView(res.tex.Get(), &dd, res.dsv[f].GetAddressOf()))) {
+        return 0;
+      }
+    }
+    D3D11_SHADER_RESOURCE_VIEW_DESC sd;
+    sd.Format = DXGI_FORMAT_R32_FLOAT;
+    sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
+    sd.TextureCube.MostDetailedMip = 0;
+    sd.TextureCube.MipLevels = 1;
+    if (FAILED(device->CreateShaderResourceView(res.tex.Get(), &sd, res.srv.GetAddressOf()))) {
+      return 0;
+    }
+    uint64_t id = nextId++;
+    cubes[id] = res;
+    return id;
+  }
+  void SetShadowCubeFace(RHIRenderTarget cube, int face) override {
+    if (face < 0 || face > 5) {
+      return;
+    }
+    auto it = cubes.find(cube);
+    if (it == cubes.end() || it->second.dsv[face] == nullptr) {
+      return;
+    }
+    if (lastCube == cube && lastCubeFace == face) {
+      return;
+    }
+    lastCube = cube;
+    lastCubeFace = face;
+    curRTs.clear();
+    curDepth = 0;
+    context->OMSetRenderTargets(0, nullptr, it->second.dsv[face].Get());
+  }
+  RHISampler CreateSamplerShadow() override {
+    D3D11_SAMPLER_DESC sd;
+    sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    sd.AddressU = D3D11_TEXTURE_ADDRESS_BORDER;
+    sd.AddressV = D3D11_TEXTURE_ADDRESS_BORDER;
+    sd.AddressW = D3D11_TEXTURE_ADDRESS_BORDER;
+    sd.MipLODBias = 0.0f;
+    sd.MaxAnisotropy = 1;
+    sd.ComparisonFunc = D3D11_COMPARISON_NEVER;
+    sd.BorderColor[0] = 1.0f;
+    sd.BorderColor[1] = 1.0f;
+    sd.BorderColor[2] = 1.0f;
+    sd.BorderColor[3] = 1.0f;
     sd.MinLOD = 0.0f;
     sd.MaxLOD = D3D11_FLOAT32_MAX;
     ComPtr<ID3D11SamplerState> sampler;
@@ -955,6 +1101,9 @@ private:
   std::unordered_map<uint64_t, ComPtr<ID3D11InputLayout>> layouts;
   std::unordered_map<uint64_t, TargetRes> targets;
   std::unordered_map<uint64_t, ComPtr<ID3D11SamplerState>> samplers;
+  std::unordered_map<uint64_t, ShadowCubeRes> cubes;
+  uint64_t lastCube = 0;
+  int lastCubeFace = -1;
   struct TexEntry {
     ComPtr<ID3D11Texture2D> tex;
     ComPtr<ID3D11ShaderResourceView> srv;

@@ -9,10 +9,45 @@ cbuffer LightCB : register(b0)
     float4 LightDir;
     float4 LightColor;
     float4 Counts;
+    float4 CamFwd;
     float4 LightA[16];
     float4 LightB[16];
     float4 LightC[16];
     float4 LightD[16];
+    row_major float4x4 CascadeVP[4];
+    float4 CascadeSplit;
+    float4 CascadeNear;
+    float4 CascadeFar;
+    float4 CascadeUV;
+    float4 CascadeK;
+    float4 CascadeSize;
+    float4 CascadeLight;
+    float4 ShadowInfo;
+    row_major float4x4 SpotVP[4];
+    float4 SpotMeta[4];
+    float4 PointInfo;
+    float4 PointMeta;
+};
+Texture2D ShadowAtlas : register(t4);
+TextureCube PointCube : register(t5);
+SamplerState ShadowSampler : register(s1);
+static const float2 Poisson16[16] = {
+    float2(-0.9428, -0.3997),
+    float2(0.9456, -0.7689),
+    float2(-0.0942, -0.9294),
+    float2(0.3450, 0.2939),
+    float2(-0.9159, 0.4577),
+    float2(-0.8154, -0.8791),
+    float2(-0.3828, 0.2768),
+    float2(0.9748, 0.1661),
+    float2(0.4435, -0.0843),
+    float2(-0.3841, -0.1009),
+    float2(0.4458, -0.7300),
+    float2(0.3809, 0.8064),
+    float2(0.3057, 0.1654),
+    float2(-0.1006, 0.7641),
+    float2(0.7675, -0.1007),
+    float2(-0.0122, 0.1461)
 };
 struct PSIn
 {
@@ -52,6 +87,126 @@ float3 ShadeOne(float3 N, float3 V, float3 L, float3 lightColor, float3 albedo, 
     float3 diff = kd * albedo;
     return (diff + spec) * lightColor * cosLi;
 }
+float BlockerSearch2D(float2 uv, float recvDist, float nearZ, float farZ, float searchUV)
+{
+    float range = max(farZ - nearZ, 1e-4);
+    float sum = 0.0;
+    int n = 0;
+    for (int k = 0; k < 16; ++k) {
+        float d = ShadowAtlas.SampleLevel(ShadowSampler, uv + Poisson16[k] * searchUV, 0).r;
+        float dist = nearZ + d * range;
+        if (dist < recvDist - range * 0.001) {
+            sum += dist;
+            n += 1;
+        }
+    }
+    if (n == 0) {
+        return -1.0;
+    }
+    return sum / (float)n;
+}
+float PCSSFilter2D(float2 uv, float recvZ, float filterUV)
+{
+    float lit = 0.0;
+    for (int k = 0; k < 16; ++k) {
+        float d = ShadowAtlas.SampleLevel(ShadowSampler, uv + Poisson16[k] * filterUV, 0).r;
+        lit += (recvZ - 0.0015 < d) ? 1.0 : 0.0;
+    }
+    return lit / 16.0;
+}
+float SampleTilePCSS(float3 wpos, row_major float4x4 vp, float tile, float tileK, float nearZ, float farZ, float uvScale, float perspTanHalf, float effSize)
+{
+    float4 sp = mul(float4(wpos, 1.0), vp);
+    if (sp.w <= 0.0) {
+        return 1.0;
+    }
+    sp.xyz /= sp.w;
+    if (abs(sp.x) > 1.0 || abs(sp.y) > 1.0 || sp.z < 0.0 || sp.z > 1.0) {
+        return 1.0;
+    }
+    float tx = fmod(tile, 2.0);
+    float ty = floor(tile / 2.0);
+    float k = clamp(tileK, 0.05, 1.0);
+    float u = (sp.x * 0.5 + 0.5) * 0.5 * k + tx * 0.5;
+    float v = (0.5 - sp.y * 0.5) * 0.5 * k + ty * 0.5;
+    float2 uv = float2(u, v);
+    float texel = ShadowInfo.w;
+    float range = max(farZ - nearZ, 1e-4);
+    float recvDist = nearZ + sp.z * range;
+    if (effSize <= 0.0001) {
+        float d0 = ShadowAtlas.SampleLevel(ShadowSampler, uv, 0).r;
+        return (sp.z - 0.0015 < d0) ? 1.0 : 0.0;
+    }
+    float us = uvScale;
+    if (perspTanHalf > 0.0) {
+        us = 0.5 * k / (2.0 * perspTanHalf * max(recvDist, 1e-4));
+    }
+    float maxR = max(0.25 * k - 4.0 * texel, texel);
+    float searchUV = min(effSize * 0.5 * us, maxR);
+    float blocker = BlockerSearch2D(uv, recvDist, nearZ, farZ, searchUV);
+    if (blocker < 0.0) {
+        return 1.0;
+    }
+    float penumbra = max((recvDist - blocker) * effSize / max(blocker, 1e-4), 0.0);
+    float filterUV = min(penumbra * us, maxR);
+    if (filterUV <= texel * 0.5) {
+        float d1 = ShadowAtlas.SampleLevel(ShadowSampler, uv, 0).r;
+        return (sp.z - 0.0015 < d1) ? 1.0 : 0.0;
+    }
+    return PCSSFilter2D(uv, sp.z, filterUV);
+}
+float LinearizeCube(float ndcZ, float nearZ, float farZ)
+{
+    float denom = 1.0 - ndcZ * (farZ - nearZ) / max(farZ, 1e-4);
+    if (denom < 1e-6) {
+        return farZ;
+    }
+    return nearZ / denom;
+}
+float SamplePointPCSS(float3 wpos, float effSize)
+{
+    float3 toFrag = wpos - PointInfo.xyz;
+    float dist = length(toFrag);
+    if (dist > PointInfo.w || dist < 1e-4) {
+        return 1.0;
+    }
+    float3 dir = toFrag / dist;
+    float3 upRef = abs(dir.y) > 0.99 ? float3(1.0, 0.0, 0.0) : float3(0.0, 1.0, 0.0);
+    float3 t1 = normalize(cross(upRef, dir));
+    float3 t2 = cross(dir, t1);
+    float nearZ = PointMeta.z;
+    float farZ = PointInfo.w;
+    if (effSize <= 0.0001) {
+        float z0 = PointCube.SampleLevel(ShadowSampler, dir, 0).r;
+        return (dist - 0.05 < LinearizeCube(z0, nearZ, farZ)) ? 1.0 : 0.0;
+    }
+    float searchAng = min((effSize * 0.5) / max(dist, 1e-4), 0.05);
+    float bsum = 0.0;
+    int bn = 0;
+    for (int k = 0; k < 16; ++k) {
+        float3 sd = normalize(dir + (t1 * Poisson16[k].x + t2 * Poisson16[k].y) * searchAng);
+        float bz = PointCube.SampleLevel(ShadowSampler, sd, 0).r;
+        float blin = LinearizeCube(bz, nearZ, farZ);
+        if (blin < dist - 0.05) {
+            bsum += blin;
+            bn += 1;
+        }
+    }
+    if (bn == 0) {
+        return 1.0;
+    }
+    float blocker = bsum / (float)bn;
+    float penumbra = max((dist - blocker) * effSize / max(blocker, 1e-4), 0.0);
+    float filterAng = min(penumbra / max(dist, 1e-4), 0.08);
+    float lit = 0.0;
+    for (int f = 0; f < 16; ++f) {
+        float3 fd = normalize(dir + (t1 * Poisson16[f].x + t2 * Poisson16[f].y) * filterAng);
+        float z = PointCube.SampleLevel(ShadowSampler, fd, 0).r;
+        float lin = LinearizeCube(z, nearZ, farZ);
+        lit += (dist - 0.05 < lin) ? 1.0 : 0.0;
+    }
+    return lit / 16.0;
+}
 float4 main(PSIn pin) : SV_Target
 {
     float3 albedo = AlbedoTX.Sample(LinearSampler, pin.uv).rgb;
@@ -61,6 +216,51 @@ float4 main(PSIn pin) : SV_Target
     float metallic = clamp(MetallicTX.Sample(LinearSampler, pin.uv).r, 0.0, 1.0);
     float3 wpos = PositionTX.Sample(LinearSampler, pin.uv).xyz;
     float3 V = normalize(CamPos.xyz - wpos);
+    float3 wposB = wpos + N * 0.03;
+    float viewDepth = dot(wpos - CamPos.xyz, CamFwd.xyz);
+    if (ShadowInfo.z > 0.5 && ShadowInfo.y > 0.5) {
+        float firstLight = 1e9;
+        for (int q = 0; q < 4; ++q) {
+            if (CascadeLight[q] >= 0.0 && CascadeLight[q] < firstLight) {
+                firstLight = CascadeLight[q];
+            }
+        }
+        if (firstLight < 1e8) {
+            int firstSlot = -1;
+            int cidx = -1;
+            for (int q = 0; q < 4; ++q) {
+                if (CascadeLight[q] == firstLight) {
+                    if (firstSlot < 0) {
+                        firstSlot = q;
+                    }
+                    if (viewDepth <= CascadeSplit[q]) {
+                        cidx = q;
+                        break;
+                    }
+                }
+            }
+            if (cidx < 0) {
+                for (int q = 3; q >= 0; --q) {
+                    if (CascadeLight[q] == firstLight) {
+                        cidx = q;
+                        break;
+                    }
+                }
+            }
+            if (cidx >= 0 && firstSlot >= 0) {
+                int cn = cidx - firstSlot;
+                float3 dbg = float3(1.0, 1.0, 0.3);
+                if (cn == 0) {
+                    dbg = float3(1.0, 0.2, 0.2);
+                } else if (cn == 1) {
+                    dbg = float3(0.2, 1.0, 0.2);
+                } else if (cn == 2) {
+                    dbg = float3(0.2, 0.4, 1.0);
+                }
+                return float4(dbg, 1.0);
+            }
+        }
+    }
     float3 Lsun = normalize(-LightDir.xyz);
     float3 col = ShadeOne(N, V, Lsun, LightColor.rgb, albedo, roughness, metallic);
     int count = (int)Counts.x;
@@ -71,7 +271,16 @@ float4 main(PSIn pin) : SV_Target
         float kind = LightA[i].w;
         if (kind > 1.5) {
             float3 Ld = normalize(-LightA[i].xyz);
-            col += ShadeOne(N, V, Ld, LightC[i].rgb, albedo, roughness, metallic);
+            float dirShadow = 1.0;
+            if (ShadowInfo.y > 0.5) {
+                for (int c = 0; c < 4; ++c) {
+                    if (CascadeLight[c] == (float)i && viewDepth <= CascadeSplit[c]) {
+                        dirShadow = SampleTilePCSS(wposB, CascadeVP[c], (float)c, CascadeK[c], CascadeNear[c], CascadeFar[c], CascadeUV[c], 0.0, CascadeSize[c]);
+                        break;
+                    }
+                }
+            }
+            col += ShadeOne(N, V, Ld, LightC[i].rgb, albedo, roughness, metallic) * dirShadow;
         } else {
             float3 toLight = LightA[i].xyz - wpos;
             float dist = length(toLight);
@@ -79,11 +288,25 @@ float4 main(PSIn pin) : SV_Target
             float range = max(LightB[i].w, 1e-3);
             float att = pow(saturate(1.0 - (dist * dist) / (range * range)), 2.0);
             float spot = 1.0;
+            float lightShadow = 1.0;
             if (kind > 0.5) {
                 float cosT = dot(L, -LightB[i].xyz);
                 spot = smoothstep(LightC[i].a, LightC[i].a + LightD[i].x, cosT);
+                if (ShadowInfo.y > 0.5) {
+                    for (int s = 0; s < 4; ++s) {
+                        if ((int)(SpotMeta[s].y + 0.5) == i && SpotMeta[s].x >= 0.0) {
+                            float cosH = max(LightC[i].a, 0.05);
+                            float tanH = sqrt(max(1.0 - cosH * cosH, 1e-6)) / cosH;
+                            lightShadow = SampleTilePCSS(wposB, SpotVP[s], SpotMeta[s].x, SpotMeta[s].w, 0.5, max(LightB[i].w, 1.0), 0.0, tanH, SpotMeta[s].z);
+                        }
+                    }
+                }
+            } else {
+                if (ShadowInfo.y > 0.5 && PointMeta.y > 0.5 && (int)(PointMeta.x + 0.5) == i) {
+                    lightShadow = SamplePointPCSS(wposB, PointMeta.w);
+                }
             }
-            col += ShadeOne(N, V, L, LightC[i].rgb, albedo, roughness, metallic) * att * spot;
+            col += ShadeOne(N, V, L, LightC[i].rgb, albedo, roughness, metallic) * att * spot * lightShadow;
         }
     }
     float3 amb = albedo * 0.03;
