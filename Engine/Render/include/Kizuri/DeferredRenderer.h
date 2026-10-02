@@ -78,6 +78,7 @@ public:
   void SetGrade(float exposure, bool aces);
   void SetBloom(float strength);
   void SetFsr(float scale, float sharpness);
+  void SetSsao(bool on, float intensity, float radius);
   bool Resize(int w, int h);
   void SetViewOffset(float x, float y);
   void Render(const float view[16], const float proj[16], const float camPos[3]);
@@ -156,6 +157,17 @@ private:
   int outH;
   float renderScale;
   float fsrSharpness;
+  RHIPixelShader ssaoPS;
+  RHIPixelShader ssaoBlurPS;
+  RHIConstBuffer ssaoCB;
+  RHIRenderTarget ssaoA;
+  RHIRenderTarget ssaoB;
+  int ssaoW;
+  int ssaoH;
+  bool ssaoOn;
+  float ssaoIntensity;
+  float ssaoRadius;
+  bool ssaoValid;
   RHIInputLayout layout;
   RHISampler sampler;
   uint32_t indexCount;

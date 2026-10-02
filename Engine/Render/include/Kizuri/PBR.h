@@ -41,4 +41,11 @@ void SkyGradient(
   const float sunColor[3],
   float sunIntensity,
   float outColor[3]);
+float SsaoTapOcclusion(
+  const float pixelPos[3],
+  const float samplePos[3],
+  const float kernelPos[3],
+  const float camPos[3],
+  float radius,
+  float bias);
 }

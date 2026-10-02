@@ -2446,7 +2446,7 @@ bool TestShaderCompile() {
     const char* file;
     const char* profile;
   };
-  Entry entries[10] = {
+  Entry entries[12] = {
     { "GeometryVS.hlsl", "vs_5_0" },
     { "GeometryPS.hlsl", "ps_5_0" },
     { "LightingVS.hlsl", "vs_5_0" },
@@ -2456,10 +2456,12 @@ bool TestShaderCompile() {
     { "BloomBlurPS.hlsl", "ps_5_0" },
     { "BloomAddPS.hlsl", "ps_5_0" },
     { "FsrEasuPS.hlsl", "ps_5_0" },
-    { "FsrRcasPS.hlsl", "ps_5_0" }
+    { "FsrRcasPS.hlsl", "ps_5_0" },
+    { "SsaoPS.hlsl", "ps_5_0" },
+    { "SsaoBlurPS.hlsl", "ps_5_0" }
   };
   const char* dirs[4] = { "Shaders", "../Shaders", "../../Shaders", "build/bin/Release/Shaders" };
-  for (int e = 0; e < 10; ++e) {
+  for (int e = 0; e < 12; ++e) {
     bool found = false;
     for (int d = 0; d < 4; ++d) {
       std::string path = std::string(dirs[d]) + "/" + entries[e].file;
@@ -2673,6 +2675,29 @@ bool TestSky() {
   float night[3] = { 0.0f, 0.0f, 0.0f };
   Kizuri::SkyGradient(up, setSun, sunCol, 2.5f, night);
   if (!(night[0] < upCol[0] && night[2] < upCol[2])) {
+    return false;
+  }
+  return true;
+}
+bool TestSSAO() {
+  float cam[3] = { 0.0f, 1.5f, -6.0f };
+  float p[3] = { 0.0f, 1.5f, 0.0f };
+  float front[3] = { 0.0f, 1.5f, -2.0f };
+  float kern[3] = { 0.0f, 1.5f, -1.0f };
+  float o1 = Kizuri::SsaoTapOcclusion(p, front, kern, cam, 5.0f, 0.01f);
+  if (!(o1 > 0.0f && o1 <= 1.0f)) {
+    return false;
+  }
+  float behind[3] = { 0.0f, 1.5f, 2.0f };
+  if (Kizuri::SsaoTapOcclusion(p, behind, kern, cam, 5.0f, 0.01f) != 0.0f) {
+    return false;
+  }
+  float far[3] = { 0.0f, 1.5f, -4.9f };
+  if (Kizuri::SsaoTapOcclusion(p, far, kern, cam, 1.0f, 0.01f) != 0.0f) {
+    return false;
+  }
+  float o2 = Kizuri::SsaoTapOcclusion(p, front, kern, cam, 5.0f, 0.01f);
+  if (o1 != o2) {
     return false;
   }
   return true;
@@ -3183,6 +3208,7 @@ int main() {
   failures += Check("PCSSMath", TestPCSSMath());
   failures += Check("ACES", TestACES());
   failures += Check("Sky", TestSky());
+  failures += Check("SSAO", TestSSAO());
   failures += Check("DbTextures", TestDbTextures());
   if (failures == 0) {
     std::printf("KizuriHello: all bootstrap libs linked and functional\n");

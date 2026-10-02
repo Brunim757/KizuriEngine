@@ -256,4 +256,32 @@ void SkyGradient(
   outColor[1] = sky[1] + sunColor[1] * glow * sf;
   outColor[2] = sky[2] + sunColor[2] * glow * sf;
 }
+float SsaoTapOcclusion(
+  const float pixelPos[3],
+  const float samplePos[3],
+  const float kernelPos[3],
+  const float camPos[3],
+  float radius,
+  float bias) {
+  float r = radius < 1e-4f ? 1e-4f : radius;
+  float dx = samplePos[0] - pixelPos[0];
+  float dy = samplePos[1] - pixelPos[1];
+  float dz = samplePos[2] - pixelPos[2];
+  float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+  if (dist > r) {
+    return 0.0f;
+  }
+  float sx = samplePos[0] - camPos[0];
+  float sy = samplePos[1] - camPos[1];
+  float sz = samplePos[2] - camPos[2];
+  float kx = kernelPos[0] - camPos[0];
+  float ky = kernelPos[1] - camPos[1];
+  float kz = kernelPos[2] - camPos[2];
+  float dcS = std::sqrt(sx * sx + sy * sy + sz * sz);
+  float dcK = std::sqrt(kx * kx + ky * ky + kz * kz);
+  if (dcS >= dcK - bias) {
+    return 0.0f;
+  }
+  return 1.0f - dist / r;
+}
 }

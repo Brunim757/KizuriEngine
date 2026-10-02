@@ -51,6 +51,9 @@ struct EditorApp {
   float viewBloom;
   float viewScale;
   float viewSharp;
+  bool viewSsao;
+  float viewSsaoIntensity;
+  float viewSsaoRadius;
   float viewX;
   float viewY;
   float viewW;

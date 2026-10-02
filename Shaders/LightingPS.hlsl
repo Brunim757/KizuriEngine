@@ -32,7 +32,10 @@ cbuffer LightCB : register(b0)
     float4 CamUp;
     float4 SkySun;
     float4 SkyColor;
+    float4 SsaoInfo;
+    row_major float4x4 SsaoVP;
 };
+Texture2D SSAOTX : register(t6);
 Texture2D ShadowAtlas : register(t4);
 TextureCube PointCube : register(t5);
 SamplerState ShadowSampler : register(s1);
@@ -362,7 +365,12 @@ float4 main(PSIn pin) : SV_Target
             col += ShadeOne(N, V, L, LightC[i].rgb, albedo, roughness, metallic) * att * spot * lightShadow;
         }
     }
-    float3 amb = albedo * 0.03;
+    float ao = 1.0;
+    if (SsaoInfo.x > 0.5) {
+        ao = SSAOTX.Sample(LinearSampler, pin.uv).r;
+    }
+    col *= ao;
+    float3 amb = albedo * 0.03 * ao;
     float3 hdr = col + amb;
     float3 expo = hdr * GradeInfo.x;
     float3 outc = expo;
