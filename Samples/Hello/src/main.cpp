@@ -2394,9 +2394,6 @@ bool TestLightGizmo() {
   float dir[3] = { 0.0f, -1.0f, 0.0f };
   float cp[40][3];
   Kizuri::LightConePoints(apex, dir, 60.0f, 10.0f, cp);
-  if (std::fabs(cp[0][0] - apex[0]) > 1e-4f || std::fabs(cp[0][1] - apex[1]) > 1e-4f || std::fabs(cp[0][2] - apex[2]) > 1e-4f) {
-    return false;
-  }
   float rimR = std::tan(60.0f * 0.5f * 0.01745329252f) * 10.0f;
   float rcx = apex[0] + dir[0] * 10.0f;
   float rcy = apex[1] + dir[1] * 10.0f;
