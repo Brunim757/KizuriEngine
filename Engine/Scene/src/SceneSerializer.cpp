@@ -236,8 +236,8 @@ bool LoadSceneFromFile(Scene& scene, const std::string& path, LogStore* log) {
       }
       if (field == "LIGHT") {
         size_t pos = (sp == std::string::npos) ? s.size() : sp + 1;
-        float b[6] = { 0.0f, 1.0f, 1.0f, 1.0f, 3.0f, 0.0f };
-        if (!ParseFloats(s, pos, b, 6)) {
+        float b[5] = { 0.0f, 1.0f, 1.0f, 1.0f, 3.0f };
+        if (!ParseFloats(s, pos, b, 5)) {
           failed = true;
           break;
         }
