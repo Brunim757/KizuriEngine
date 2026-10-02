@@ -173,4 +173,87 @@ void PBR_Spot(
   float spot = Smooth01(cosOuter, cosOuter + w, cosT);
   ShadeCore(albedo, roughness, metallic, N, V, L, lightColor, att * spot, outColor);
 }
+float ACESFilm(float x) {
+  if (x <= 0.0f) {
+    return 0.0f;
+  }
+  return (x * (2.51f * x + 0.03f)) / (x * (2.43f * x + 0.59f) + 0.14f);
+}
+void SkyGradient(
+  const float viewDir[3],
+  const float sunDirTo[3],
+  const float sunColor[3],
+  float sunIntensity,
+  float outColor[3]) {
+  float vx = viewDir[0];
+  float vy = viewDir[1];
+  float vz = viewDir[2];
+  float vl = std::sqrt(vx * vx + vy * vy + vz * vz);
+  if (vl < 1e-6f) {
+    vl = 1e-6f;
+  }
+  float dx = vx / vl;
+  float dy = vy / vl;
+  float dz = vz / vl;
+  float sx = sunDirTo[0];
+  float sy = sunDirTo[1];
+  float sz = sunDirTo[2];
+  float sl = std::sqrt(sx * sx + sy * sy + sz * sz);
+  if (sl < 1e-6f) {
+    sl = 1e-6f;
+  }
+  sx /= sl;
+  sy /= sl;
+  sz /= sl;
+  float dayness = sy * 3.0f + 0.3f;
+  if (dayness < 0.0f) {
+    dayness = 0.0f;
+  }
+  if (dayness > 1.0f) {
+    dayness = 1.0f;
+  }
+  float upness = dy < 0.0f ? 0.0f : dy;
+  if (upness > 1.0f) {
+    upness = 1.0f;
+  }
+  float zen[3] = { 0.20f, 0.38f, 0.70f };
+  float hor[3] = { 0.65f, 0.55f, 0.45f };
+  float gnd[3] = { 0.10f, 0.09f, 0.08f };
+  float zb = 0.15f + 0.85f * dayness;
+  float pw = std::pow(upness, 0.5f);
+  float sky[3];
+  sky[0] = hor[0] + (zen[0] - hor[0]) * pw;
+  sky[1] = hor[1] + (zen[1] - hor[1]) * pw;
+  sky[2] = hor[2] + (zen[2] - hor[2]) * pw;
+  float at = dy < 0.0f ? -dy : dy;
+  float hb = std::exp(-at * 6.0f);
+  sky[0] += (hor[0] - sky[0]) * hb * 0.5f;
+  sky[1] += (hor[1] - sky[1]) * hb * 0.5f;
+  sky[2] += (hor[2] - sky[2]) * hb * 0.5f;
+  if (dy < 0.0f) {
+    float gk = -dy * 3.0f;
+    if (gk > 1.0f) {
+      gk = 1.0f;
+    }
+    sky[0] += (gnd[0] - sky[0]) * gk;
+    sky[1] += (gnd[1] - sky[1]) * gk;
+    sky[2] += (gnd[2] - sky[2]) * gk;
+  }
+  float dim = (0.2f + 0.8f * dayness) * zb;
+  sky[0] *= dim;
+  sky[1] *= dim;
+  sky[2] *= dim;
+  float cosG = dx * sx + dy * sy + dz * sz;
+  if (cosG < 0.0f) {
+    cosG = 0.0f;
+  }
+  if (cosG > 1.0f) {
+    cosG = 1.0f;
+  }
+  float glow = std::pow(cosG, 900.0f) * 4.0f + std::pow(cosG, 10.0f) * 0.25f;
+  float sf = (0.15f + 0.85f * dayness) * sunIntensity;
+  outColor[0] = sky[0] + sunColor[0] * glow * sf;
+  outColor[1] = sky[1] + sunColor[1] * glow * sf;
+  outColor[2] = sky[2] + sunColor[2] * glow * sf;
+}
 }

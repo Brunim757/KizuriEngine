@@ -49,27 +49,30 @@ void EditorApp::RenderScene() {
   float cpz = 0.0f;
   camera.GetPosition(cpx, cpy, cpz);
   float cpos[3] = { cpx, cpy, cpz };
+  renderer.SetFsr(viewScale, viewSharp);
   renderer.BeginObjects(&vf.m[0][0], &pf.m[0][0]);
   renderer.ClearLights();
-  ShadowCameraSetup shadowCam;
-  shadowCam.camPos[0] = cpx;
-  shadowCam.camPos[1] = cpy;
-  shadowCam.camPos[2] = cpz;
-  shadowCam.camFwd[0] = vf.m[2][0];
-  shadowCam.camFwd[1] = vf.m[2][1];
-  shadowCam.camFwd[2] = vf.m[2][2];
-  shadowCam.camRight[0] = vf.m[0][0];
-  shadowCam.camRight[1] = vf.m[0][1];
-  shadowCam.camRight[2] = vf.m[0][2];
-  shadowCam.camUp[0] = vf.m[1][0];
-  shadowCam.camUp[1] = vf.m[1][1];
-  shadowCam.camUp[2] = vf.m[1][2];
-  shadowCam.fovY = camera.fovY;
-  shadowCam.aspect = aspect;
-  shadowCam.nearZ = camera.nearZ;
-  shadowCam.farZ = camera.farZ;
-  renderer.SetShadowCamera(shadowCam);
+  MainCameraSetup mainCam;
+  mainCam.camPos[0] = cpx;
+  mainCam.camPos[1] = cpy;
+  mainCam.camPos[2] = cpz;
+  mainCam.camFwd[0] = vf.m[2][0];
+  mainCam.camFwd[1] = vf.m[2][1];
+  mainCam.camFwd[2] = vf.m[2][2];
+  mainCam.camRight[0] = vf.m[0][0];
+  mainCam.camRight[1] = vf.m[0][1];
+  mainCam.camRight[2] = vf.m[0][2];
+  mainCam.camUp[0] = vf.m[1][0];
+  mainCam.camUp[1] = vf.m[1][1];
+  mainCam.camUp[2] = vf.m[1][2];
+  mainCam.fovY = camera.fovY;
+  mainCam.aspect = aspect;
+  mainCam.nearZ = camera.nearZ;
+  mainCam.farZ = camera.farZ;
+  renderer.SetMainCamera(mainCam);
   renderer.SetShadowDebug(debugCascades);
+  renderer.SetGrade(viewExposure, viewACES);
+  renderer.SetBloom(viewBloom);
   std::vector<EntityId> lightIds = scene.All();
   for (size_t i = 0; i < lightIds.size(); ++i) {
     const Entity* e = scene.Get(lightIds[i]);
@@ -261,6 +264,19 @@ void EditorApp::DrawViewport() {
   }
   ImGui::SameLine();
   ImGui::Checkbox("Debug CSM", &debugCascades);
+  ImGui::SameLine();
+  ImGui::Checkbox("ACES", &viewACES);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(110.0f);
+  ImGui::SliderFloat("Exposure", &viewExposure, 0.25f, 4.0f);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(110.0f);
+  ImGui::SliderFloat("Bloom", &viewBloom, 0.0f, 2.0f);
+  ImGui::SetNextItemWidth(110.0f);
+  ImGui::SliderFloat("Render Scale", &viewScale, 0.5f, 1.0f);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(110.0f);
+  ImGui::SliderFloat("Sharp", &viewSharp, 0.0f, 1.0f);
   if (ImGui::IsWindowHovered() && !ImGui::GetIO().WantTextInput && !RawInputPoll::IsMouseDown(VK_RBUTTON)) {
     if (ImGui::IsKeyPressed(ImGuiKey_W, false)) {
       gizmoOp = static_cast<int>(ImGuizmo::TRANSLATE);

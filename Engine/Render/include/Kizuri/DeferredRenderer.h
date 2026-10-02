@@ -43,7 +43,7 @@ struct RenderDirectionalLight {
   int cascades;
   float lambda;
 };
-struct ShadowCameraSetup {
+struct MainCameraSetup {
   float camPos[3];
   float camFwd[3];
   float camRight[3];
@@ -73,8 +73,11 @@ public:
   void AddPointLight(const RenderPointLight& light);
   void AddSpotLight(const RenderSpotLight& light);
   void AddDirectionalLight(const RenderDirectionalLight& light);
-  void SetShadowCamera(const ShadowCameraSetup& setup);
+  void SetMainCamera(const MainCameraSetup& setup);
   void SetShadowDebug(bool debug);
+  void SetGrade(float exposure, bool aces);
+  void SetBloom(float strength);
+  void SetFsr(float scale, float sharpness);
   bool Resize(int w, int h);
   void SetViewOffset(float x, float y);
   void Render(const float view[16], const float proj[16], const float camPos[3]);
@@ -112,7 +115,7 @@ private:
   bool shadowsAvailable;
   bool shadowDebug;
   bool shadowMapsValid;
-  ShadowCameraSetup shadowCam;
+  MainCameraSetup mainCam;
   float shadowCascadeVP[4][16];
   float shadowCascadeSplit[4];
   float shadowCascadeNear[4];
@@ -132,6 +135,27 @@ private:
   int shadowPointLight;
   bool shadowPointActive;
   std::vector<ShadowDrawItem> shadowDraws;
+  RHIPixelShader bloomBrightPS;
+  RHIPixelShader bloomBlurPS;
+  RHIPixelShader bloomAddPS;
+  RHIConstBuffer bloomCB;
+  RHIRenderTarget gLight;
+  RHIRenderTarget bloomA;
+  RHIRenderTarget bloomB;
+  int bloomW;
+  int bloomH;
+  float exposure;
+  bool acesOn;
+  float bloomStrength;
+  RHIPixelShader fsrEasuPS;
+  RHIPixelShader fsrRcasPS;
+  RHIConstBuffer fsrCB;
+  RHIRenderTarget fsrA;
+  RHIRenderTarget fsrOut;
+  int outW;
+  int outH;
+  float renderScale;
+  float fsrSharpness;
   RHIInputLayout layout;
   RHISampler sampler;
   uint32_t indexCount;

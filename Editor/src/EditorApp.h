@@ -46,6 +46,11 @@ struct EditorApp {
   bool showAssetBrowser;
   bool showAbout;
   bool debugCascades;
+  float viewExposure;
+  bool viewACES;
+  float viewBloom;
+  float viewScale;
+  float viewSharp;
   float viewX;
   float viewY;
   float viewW;

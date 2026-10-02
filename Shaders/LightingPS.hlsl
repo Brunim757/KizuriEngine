@@ -27,6 +27,11 @@ cbuffer LightCB : register(b0)
     float4 SpotMeta[4];
     float4 PointInfo;
     float4 PointMeta;
+    float4 GradeInfo;
+    float4 CamRight;
+    float4 CamUp;
+    float4 SkySun;
+    float4 SkyColor;
 };
 Texture2D ShadowAtlas : register(t4);
 TextureCube PointCube : register(t5);
@@ -207,6 +212,41 @@ float SamplePointPCSS(float3 wpos, float effSize)
     }
     return lit / 16.0;
 }
+float ACESFilm(float x)
+{
+    if (x <= 0.0) {
+        return 0.0;
+    }
+    return (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14);
+}
+float3 SkyGradient(float3 viewDir, float3 sunDirTo, float3 sunColor, float sunIntensity)
+{
+    float vl = max(length(viewDir), 1e-6);
+    float3 d = viewDir / vl;
+    float sl = max(length(sunDirTo), 1e-6);
+    float3 s = sunDirTo / sl;
+    float dayness = clamp(s.y * 3.0 + 0.3, 0.0, 1.0);
+    float upness = clamp(d.y, 0.0, 1.0);
+    float3 zen = float3(0.20, 0.38, 0.70);
+    float3 hor = float3(0.65, 0.55, 0.45);
+    float3 gnd = float3(0.10, 0.09, 0.08);
+    float zb = 0.15 + 0.85 * dayness;
+    float pw = pow(upness, 0.5);
+    float3 sky = hor + (zen - hor) * pw;
+    float at = abs(d.y);
+    float hb = exp(-at * 6.0);
+    sky += (hor - sky) * hb * 0.5;
+    if (d.y < 0.0) {
+        float gk = clamp(-d.y * 3.0, 0.0, 1.0);
+        sky += (gnd - sky) * gk;
+    }
+    float dim = (0.2 + 0.8 * dayness) * zb;
+    sky *= dim;
+    float cosG = clamp(dot(d, s), 0.0, 1.0);
+    float glow = pow(cosG, 900.0) * 4.0 + pow(cosG, 10.0) * 0.25;
+    float sf = (0.15 + 0.85 * dayness) * sunIntensity;
+    return sky + sunColor * glow * sf;
+}
 float4 main(PSIn pin) : SV_Target
 {
     float3 albedo = AlbedoTX.Sample(LinearSampler, pin.uv).rgb;
@@ -215,6 +255,19 @@ float4 main(PSIn pin) : SV_Target
     float roughness = clamp(nr.w, 0.04, 1.0);
     float metallic = clamp(MetallicTX.Sample(LinearSampler, pin.uv).r, 0.0, 1.0);
     float3 wpos = PositionTX.Sample(LinearSampler, pin.uv).xyz;
+    if (dot(wpos, wpos) < 1e-8) {
+        float2 ndc2 = float2(pin.uv.x * 2.0 - 1.0, 1.0 - pin.uv.y * 2.0);
+        float3 ray = CamFwd.xyz + CamRight.xyz * (ndc2.x * CamRight.w * CamUp.w) + CamUp.xyz * (ndc2.y * CamRight.w);
+        ray = normalize(ray);
+        float sint = max(SkySun.w, 1e-3);
+        float3 sk = SkyGradient(ray, normalize(SkySun.xyz), SkyColor.rgb, sint);
+        float3 se = sk * GradeInfo.x;
+        float3 st = se;
+        if (GradeInfo.y > 0.5) {
+            st = float3(ACESFilm(se.r), ACESFilm(se.g), ACESFilm(se.b));
+        }
+        return float4(st, 1.0);
+    }
     float3 V = normalize(CamPos.xyz - wpos);
     float3 wposB = wpos + N * 0.03;
     float viewDepth = dot(wpos - CamPos.xyz, CamFwd.xyz);
@@ -310,5 +363,11 @@ float4 main(PSIn pin) : SV_Target
         }
     }
     float3 amb = albedo * 0.03;
-    return float4(col + amb, 1.0);
+    float3 hdr = col + amb;
+    float3 expo = hdr * GradeInfo.x;
+    float3 outc = expo;
+    if (GradeInfo.y > 0.5) {
+        outc = float3(ACESFilm(expo.r), ACESFilm(expo.g), ACESFilm(expo.b));
+    }
+    return float4(outc, 1.0);
 }

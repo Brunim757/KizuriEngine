@@ -1,5 +1,8 @@
 #include "Kizuri/DeferredRenderer.h"
 #include "Kizuri/Shadows.h"
+#define A_CPU 1
+#include "ffx_a.h"
+#include "ffx_fsr1.h"
 #include <cmath>
 #include <cstring>
 #include <string>
@@ -33,6 +36,11 @@ struct LightConstants {
   float spotMeta[4][4];
   float pointInfo[4];
   float pointMeta[4];
+  float gradeInfo[4];
+  float camRight[4];
+  float camUp[4];
+  float skySun[4];
+  float skyColor[4];
 };
 struct MatConstants {
   float albedo[4];
@@ -72,6 +80,27 @@ DeferredRenderer::DeferredRenderer()
   , shadowPointSize(0.0f)
   , shadowPointLight(-1)
   , shadowPointActive(false)
+  , bloomBrightPS(0)
+  , bloomBlurPS(0)
+  , bloomAddPS(0)
+  , bloomCB(0)
+  , gLight(0)
+  , bloomA(0)
+  , bloomB(0)
+  , bloomW(1)
+  , bloomH(1)
+  , exposure(1.0f)
+  , acesOn(true)
+  , bloomStrength(0.5f)
+  , fsrEasuPS(0)
+  , fsrRcasPS(0)
+  , fsrCB(0)
+  , fsrA(0)
+  , fsrOut(0)
+  , outW(0)
+  , outH(0)
+  , renderScale(1.0f)
+  , fsrSharpness(0.5f)
   , layout(0)
   , sampler(0)
   , indexCount(0)
@@ -91,7 +120,7 @@ DeferredRenderer::DeferredRenderer()
   light.color[1] = 1.0f;
   light.color[2] = 1.0f;
   light.intensity = 2.5f;
-  std::memset(&shadowCam, 0, sizeof(shadowCam));
+  std::memset(&mainCam, 0, sizeof(mainCam));
   std::memset(shadowCascadeVP, 0, sizeof(shadowCascadeVP));
   std::memset(shadowCascadeSplit, 0, sizeof(shadowCascadeSplit));
   std::memset(shadowCascadeNear, 0, sizeof(shadowCascadeNear));
@@ -119,20 +148,44 @@ bool DeferredRenderer::Initialize(IRHI* r, int vw, int vh, const char* shaderDir
     return false;
   }
   rhi = r;
-  w = vw;
-  h = vh;
+  outW = vw;
+  outH = vh;
+  w = static_cast<int>(static_cast<float>(vw) * renderScale);
+  h = static_cast<int>(static_cast<float>(vh) * renderScale);
+  if (w < 1) {
+    w = 1;
+  }
+  if (h < 1) {
+    h = 1;
+  }
   std::string dir(shaderDir);
   std::string geoVSPath = dir + "/GeometryVS.hlsl";
   std::string geoPSPath = dir + "/GeometryPS.hlsl";
   std::string lightVSPath = dir + "/LightingVS.hlsl";
   std::string lightPSPath = dir + "/LightingPS.hlsl";
   std::string depthVSPath = dir + "/DepthVS.hlsl";
+  std::string bloomBrightPath = dir + "/BloomBrightPS.hlsl";
+  std::string bloomBlurPath = dir + "/BloomBlurPS.hlsl";
+  std::string bloomAddPath = dir + "/BloomAddPS.hlsl";
+  std::string fsrEasuPath = dir + "/FsrEasuPS.hlsl";
+  std::string fsrRcasPath = dir + "/FsrRcasPS.hlsl";
   geoVS = rhi->CreateVertexShaderFromFile(geoVSPath.c_str(), "main");
   geoPS = rhi->CreatePixelShaderFromFile(geoPSPath.c_str(), "main");
   lightVS = rhi->CreateVertexShaderFromFile(lightVSPath.c_str(), "main");
   lightPS = rhi->CreatePixelShaderFromFile(lightPSPath.c_str(), "main");
   depthVS = rhi->CreateVertexShaderFromFile(depthVSPath.c_str(), "main");
+  bloomBrightPS = rhi->CreatePixelShaderFromFile(bloomBrightPath.c_str(), "main");
+  bloomBlurPS = rhi->CreatePixelShaderFromFile(bloomBlurPath.c_str(), "main");
+  bloomAddPS = rhi->CreatePixelShaderFromFile(bloomAddPath.c_str(), "main");
   if (geoVS == 0 || geoPS == 0 || lightVS == 0 || lightPS == 0 || depthVS == 0) {
+    return false;
+  }
+  if (bloomBrightPS == 0 || bloomBlurPS == 0 || bloomAddPS == 0) {
+    return false;
+  }
+  fsrEasuPS = rhi->CreatePixelShaderFromFile(fsrEasuPath.c_str(), "main");
+  fsrRcasPS = rhi->CreatePixelShaderFromFile(fsrRcasPath.c_str(), "main");
+  if (fsrEasuPS == 0 || fsrRcasPS == 0) {
     return false;
   }
   layout = rhi->CreateInputLayoutPNU(geoVS);
@@ -145,10 +198,17 @@ bool DeferredRenderer::Initialize(IRHI* r, int vw, int vh, const char* shaderDir
   std::memset(&lc, 0, sizeof(lc));
   MatConstants mc;
   std::memset(&mc, 0, sizeof(mc));
+  float bloomInit[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+  uint32_t fsrInit[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
   geoCB = rhi->CreateConstantBuffer(sizeof(GeoConstants), &gc);
   lightCB = rhi->CreateConstantBuffer(sizeof(LightConstants), &lc);
   matCB = rhi->CreateConstantBuffer(sizeof(MatConstants), &mc);
+  bloomCB = rhi->CreateConstantBuffer(sizeof(bloomInit), &bloomInit);
+  fsrCB = rhi->CreateConstantBuffer(sizeof(fsrInit), &fsrInit);
   if (geoCB == 0 || lightCB == 0 || matCB == 0) {
+    return false;
+  }
+  if (bloomCB == 0 || fsrCB == 0) {
     return false;
   }
   sampler = rhi->CreateSamplerLinear();
@@ -199,6 +259,14 @@ void DeferredRenderer::Shutdown() {
   if (matCB != 0) {
     rhi->DestroyConstantBuffer(matCB);
     matCB = 0;
+  }
+  if (bloomCB != 0) {
+    rhi->DestroyConstantBuffer(bloomCB);
+    bloomCB = 0;
+  }
+  if (fsrCB != 0) {
+    rhi->DestroyConstantBuffer(fsrCB);
+    fsrCB = 0;
   }
   rhi = nullptr;
   ready = false;
@@ -275,11 +343,30 @@ void DeferredRenderer::AddDirectionalLight(const RenderDirectionalLight& l) {
   }
   dirLights.push_back(l);
 }
-void DeferredRenderer::SetShadowCamera(const ShadowCameraSetup& setup) {
-  shadowCam = setup;
+void DeferredRenderer::SetMainCamera(const MainCameraSetup& setup) {
+  mainCam = setup;
 }
 void DeferredRenderer::SetShadowDebug(bool debug) {
   shadowDebug = debug;
+}
+void DeferredRenderer::SetGrade(float e, bool aces) {
+  exposure = e;
+  if (exposure < 0.05f) {
+    exposure = 0.05f;
+  }
+  if (exposure > 8.0f) {
+    exposure = 8.0f;
+  }
+  acesOn = aces;
+}
+void DeferredRenderer::SetBloom(float strength) {
+  bloomStrength = strength;
+  if (bloomStrength < 0.0f) {
+    bloomStrength = 0.0f;
+  }
+  if (bloomStrength > 2.0f) {
+    bloomStrength = 2.0f;
+  }
 }
 void DeferredRenderer::RenderShadowMaps() {
   shadowCascadeActive = 0;
@@ -313,9 +400,9 @@ void DeferredRenderer::RenderShadowMaps() {
     if (candCount >= 32) {
       break;
     }
-    float dx = pointLights[i].pos[0] - shadowCam.camPos[0];
-    float dy = pointLights[i].pos[1] - shadowCam.camPos[1];
-    float dz = pointLights[i].pos[2] - shadowCam.camPos[2];
+    float dx = pointLights[i].pos[0] - mainCam.camPos[0];
+    float dy = pointLights[i].pos[1] - mainCam.camPos[1];
+    float dz = pointLights[i].pos[2] - mainCam.camPos[2];
     cands[candCount].isSpot = false;
     cands[candCount].index = i;
     cands[candCount].distSq = dx * dx + dy * dy + dz * dz;
@@ -329,9 +416,9 @@ void DeferredRenderer::RenderShadowMaps() {
     if (candCount >= 32) {
       break;
     }
-    float dx = spotLights[i].pos[0] - shadowCam.camPos[0];
-    float dy = spotLights[i].pos[1] - shadowCam.camPos[1];
-    float dz = spotLights[i].pos[2] - shadowCam.camPos[2];
+    float dx = spotLights[i].pos[0] - mainCam.camPos[0];
+    float dy = spotLights[i].pos[1] - mainCam.camPos[1];
+    float dz = spotLights[i].pos[2] - mainCam.camPos[2];
     cands[candCount].isSpot = true;
     cands[candCount].index = i;
     cands[candCount].distSq = dx * dx + dy * dy + dz * dz;
@@ -428,7 +515,7 @@ void DeferredRenderer::RenderShadowMaps() {
       res = 1024;
     }
     float splits[5] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
-    ShadowSplitDepths(shadowCam.nearZ, shadowCam.farZ, need, dl.lambda, splits);
+    ShadowSplitDepths(mainCam.nearZ, mainCam.farZ, need, dl.lambda, splits);
     for (int c = 0; c < need; ++c) {
       int tile = start + c;
       if (tile < 0 || tile >= 4) {
@@ -438,7 +525,7 @@ void DeferredRenderer::RenderShadowMaps() {
       float cn = 0.0f;
       float cf = 1.0f;
       float ce = 1.0f;
-      ShadowSunMatrix(dl.dir, shadowCam.camPos, shadowCam.camFwd, shadowCam.camRight, shadowCam.camUp, shadowCam.fovY, shadowCam.aspect, splits[c], splits[c + 1], res, vp, cn, cf, ce);
+      ShadowSunMatrix(dl.dir, mainCam.camPos, mainCam.camFwd, mainCam.camRight, mainCam.camUp, mainCam.fovY, mainCam.aspect, splits[c], splits[c + 1], res, vp, cn, cf, ce);
       std::memcpy(shadowCascadeVP[tile], vp, sizeof(shadowCascadeVP[tile]));
       shadowCascadeSplit[tile] = splits[c + 1];
       shadowCascadeNear[tile] = cn;
@@ -555,10 +642,51 @@ bool DeferredRenderer::Resize(int nw, int nh) {
   if (nw <= 0 || nh <= 0) {
     return false;
   }
-  w = nw;
-  h = nh;
+  outW = nw;
+  outH = nh;
+  w = static_cast<int>(static_cast<float>(nw) * renderScale);
+  h = static_cast<int>(static_cast<float>(nh) * renderScale);
+  if (w < 1) {
+    w = 1;
+  }
+  if (h < 1) {
+    h = 1;
+  }
   DestroyTargets();
   return CreateTargets();
+}
+void DeferredRenderer::SetFsr(float scale, float sharpness) {
+  float s = scale;
+  if (s < 0.5f) {
+    s = 0.5f;
+  }
+  if (s > 1.0f) {
+    s = 1.0f;
+  }
+  float sh = sharpness;
+  if (sh < 0.0f) {
+    sh = 0.0f;
+  }
+  if (sh > 1.0f) {
+    sh = 1.0f;
+  }
+  if (s == renderScale && sh == fsrSharpness) {
+    return;
+  }
+  renderScale = s;
+  fsrSharpness = sh;
+  if (outW > 0 && outH > 0) {
+    w = static_cast<int>(static_cast<float>(outW) * renderScale);
+    h = static_cast<int>(static_cast<float>(outH) * renderScale);
+    if (w < 1) {
+      w = 1;
+    }
+    if (h < 1) {
+      h = 1;
+    }
+    DestroyTargets();
+    CreateTargets();
+  }
 }
 void DeferredRenderer::SetViewOffset(float x, float y) {
   viewX = x;
@@ -571,10 +699,15 @@ void DeferredRenderer::RenderToTexture(const float view[16], const float proj[16
   RenderInternal(view, proj, camPos, true);
 }
 void* DeferredRenderer::GetViewportTexture() {
-  if (rhi == nullptr || gViewport == 0) {
+  if (rhi == nullptr) {
     return nullptr;
   }
-  return rhi->GetRenderTargetSRV(gViewport);
+  bool fsrActive = renderScale < 0.999f && fsrOut != 0;
+  RHIRenderTarget rt = fsrActive ? fsrOut : gViewport;
+  if (rt == 0) {
+    return nullptr;
+  }
+  return rhi->GetRenderTargetSRV(rt);
 }
 void DeferredRenderer::BeginObjects(const float view[16], const float proj[16]) {
   begun = false;
@@ -717,7 +850,7 @@ void DeferredRenderer::EndInternal(const float camPos[3], bool toTexture) {
   begun = false;
   RenderShadowMaps();
   if (toTexture) {
-    rhi->SetRenderTargets(1, &gViewport, 0);
+    rhi->SetRenderTargets(1, &gLight, 0);
   } else {
     rhi->BindBackbuffer();
   }
@@ -762,9 +895,9 @@ void DeferredRenderer::EndInternal(const float camPos[3], bool toTexture) {
   lc.counts[1] = 0.0f;
   lc.counts[2] = 0.0f;
   lc.counts[3] = 0.0f;
-  lc.camFwd[0] = shadowCam.camFwd[0];
-  lc.camFwd[1] = shadowCam.camFwd[1];
-  lc.camFwd[2] = shadowCam.camFwd[2];
+  lc.camFwd[0] = mainCam.camFwd[0];
+  lc.camFwd[1] = mainCam.camFwd[1];
+  lc.camFwd[2] = mainCam.camFwd[2];
   lc.camFwd[3] = 0.0f;
   size_t li = 0;
   for (size_t i = 0; i < pointLights.size() && li < 16; ++i) {
@@ -859,10 +992,6 @@ void DeferredRenderer::EndInternal(const float camPos[3], bool toTexture) {
     lc.lightD[li][2] = 0.0f;
     lc.lightD[li][3] = 0.0f;
   }
-  lc.camFwd[0] = shadowCam.camFwd[0];
-  lc.camFwd[1] = shadowCam.camFwd[1];
-  lc.camFwd[2] = shadowCam.camFwd[2];
-  lc.camFwd[3] = 0.0f;
   for (int c = 0; c < 4; ++c) {
     std::memcpy(lc.cascadeVP[c], shadowCascadeVP[c], sizeof(lc.cascadeVP[c]));
     lc.cascadeSplit[c] = shadowCascadeSplit[c];
@@ -892,6 +1021,45 @@ void DeferredRenderer::EndInternal(const float camPos[3], bool toTexture) {
   lc.pointMeta[1] = shadowPointActive ? 1.0f : 0.0f;
   lc.pointMeta[2] = shadowPointNear;
   lc.pointMeta[3] = shadowPointSize;
+  lc.gradeInfo[0] = exposure;
+  lc.gradeInfo[1] = acesOn ? 1.0f : 0.0f;
+  lc.gradeInfo[2] = 0.0f;
+  lc.gradeInfo[3] = 0.0f;
+  lc.camRight[0] = mainCam.camRight[0];
+  lc.camRight[1] = mainCam.camRight[1];
+  lc.camRight[2] = mainCam.camRight[2];
+  lc.camRight[3] = std::tan(mainCam.fovY * 0.5f);
+  lc.camUp[0] = mainCam.camUp[0];
+  lc.camUp[1] = mainCam.camUp[1];
+  lc.camUp[2] = mainCam.camUp[2];
+  lc.camUp[3] = mainCam.aspect;
+  float skyDir[3] = { -light.direction[0], -light.direction[1], -light.direction[2] };
+  float skyCol[3] = { light.color[0], light.color[1], light.color[2] };
+  float skyInt = light.intensity;
+  if (!dirLights.empty()) {
+    skyDir[0] = -dirLights[0].dir[0];
+    skyDir[1] = -dirLights[0].dir[1];
+    skyDir[2] = -dirLights[0].dir[2];
+    skyCol[0] = dirLights[0].color[0];
+    skyCol[1] = dirLights[0].color[1];
+    skyCol[2] = dirLights[0].color[2];
+    skyInt = dirLights[0].intensity;
+  }
+  float skyLen = std::sqrt(skyDir[0] * skyDir[0] + skyDir[1] * skyDir[1] + skyDir[2] * skyDir[2]);
+  if (skyLen < 1e-6f) {
+    skyDir[0] = 0.36f;
+    skyDir[1] = 0.9f;
+    skyDir[2] = 0.27f;
+    skyLen = 1.0f;
+  }
+  lc.skySun[0] = skyDir[0] / skyLen;
+  lc.skySun[1] = skyDir[1] / skyLen;
+  lc.skySun[2] = skyDir[2] / skyLen;
+  lc.skySun[3] = skyInt;
+  lc.skyColor[0] = skyCol[0];
+  lc.skyColor[1] = skyCol[1];
+  lc.skyColor[2] = skyCol[2];
+  lc.skyColor[3] = 0.0f;
   rhi->UpdateConstantBuffer(lightCB, &lc, sizeof(lc));
   rhi->SetPixelConstantBuffer(0, lightCB);
   if (shadowMapsValid) {
@@ -907,6 +1075,88 @@ void DeferredRenderer::EndInternal(const float camPos[3], bool toTexture) {
   rhi->SetPixelTexture(4, 0);
   rhi->SetPixelTexture(5, 0);
   if (toTexture) {
+    float bp[4] = { 0.8f, 0.0f, 0.0f, 0.0f };
+    rhi->UpdateConstantBuffer(bloomCB, &bp, sizeof(bp));
+    rhi->SetPixelConstantBuffer(0, bloomCB);
+    rhi->SetPixelSampler(0, sampler);
+    rhi->SetRenderTargets(1, &bloomA, 0);
+    RHIViewport bvp;
+    bvp.x = 0.0f;
+    bvp.y = 0.0f;
+    bvp.w = static_cast<float>(bloomW);
+    bvp.h = static_cast<float>(bloomH);
+    bvp.minD = 0.0f;
+    bvp.maxD = 1.0f;
+    rhi->SetViewport(bvp);
+    rhi->SetPixelShader(bloomBrightPS);
+    rhi->SetPixelTexture(0, gLight);
+    rhi->DrawFullscreenTriangle();
+    float bh[4] = { 1.0f / static_cast<float>(bloomW), 0.0f, 0.0f, 0.0f };
+    rhi->UpdateConstantBuffer(bloomCB, &bh, sizeof(bh));
+    rhi->SetRenderTargets(1, &bloomB, 0);
+    rhi->SetPixelShader(bloomBlurPS);
+    rhi->SetPixelTexture(0, bloomA);
+    rhi->DrawFullscreenTriangle();
+    float bv[4] = { 0.0f, 1.0f / static_cast<float>(bloomH), 0.0f, 0.0f };
+    rhi->UpdateConstantBuffer(bloomCB, &bv, sizeof(bv));
+    rhi->SetRenderTargets(1, &bloomA, 0);
+    rhi->SetPixelTexture(0, bloomB);
+    rhi->DrawFullscreenTriangle();
+    float ba[4] = { bloomStrength, 0.0f, 0.0f, 0.0f };
+    rhi->UpdateConstantBuffer(bloomCB, &ba, sizeof(ba));
+    rhi->SetRenderTargets(1, &gViewport, 0);
+    RHIViewport fvp;
+    fvp.x = viewX;
+    fvp.y = viewY;
+    fvp.w = static_cast<float>(w);
+    fvp.h = static_cast<float>(h);
+    fvp.minD = 0.0f;
+    fvp.maxD = 1.0f;
+    rhi->SetViewport(fvp);
+    rhi->SetPixelShader(bloomAddPS);
+    rhi->SetPixelTexture(0, gLight);
+    rhi->SetPixelTexture(1, bloomA);
+    rhi->DrawFullscreenTriangle();
+    rhi->SetPixelTexture(0, 0);
+    rhi->SetPixelTexture(1, 0);
+    bool fsrActive = renderScale < 0.999f && fsrA != 0 && fsrOut != 0;
+    if (fsrActive) {
+      AU1 con0[4];
+      AU1 con1[4];
+      AU1 con2[4];
+      AU1 con3[4];
+      FsrEasuCon(con0, con1, con2, con3, (AF1)w, (AF1)h, (AF1)w, (AF1)h, (AF1)outW, (AF1)outH);
+      uint32_t easu[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+      std::memcpy(&easu[0], con0, sizeof(uint32_t) * 4);
+      std::memcpy(&easu[4], con1, sizeof(uint32_t) * 4);
+      std::memcpy(&easu[8], con2, sizeof(uint32_t) * 4);
+      std::memcpy(&easu[12], con3, sizeof(uint32_t) * 4);
+      rhi->UpdateConstantBuffer(fsrCB, &easu, sizeof(easu));
+      rhi->SetPixelConstantBuffer(0, fsrCB);
+      rhi->SetPixelSampler(0, sampler);
+      rhi->SetRenderTargets(1, &fsrA, 0);
+      RHIViewport fsvp;
+      fsvp.x = 0.0f;
+      fsvp.y = 0.0f;
+      fsvp.w = static_cast<float>(outW);
+      fsvp.h = static_cast<float>(outH);
+      fsvp.minD = 0.0f;
+      fsvp.maxD = 1.0f;
+      rhi->SetViewport(fsvp);
+      rhi->SetPixelShader(fsrEasuPS);
+      rhi->SetPixelTexture(0, gViewport);
+      rhi->DrawFullscreenTriangle();
+      AU1 rcon[4];
+      FsrRcasCon(rcon, (AF1)((1.0f - fsrSharpness) * 2.0f));
+      uint32_t rcas[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+      std::memcpy(&rcas[0], rcon, sizeof(uint32_t) * 4);
+      rhi->UpdateConstantBuffer(fsrCB, &rcas, sizeof(rcas));
+      rhi->SetRenderTargets(1, &fsrOut, 0);
+      rhi->SetPixelShader(fsrRcasPS);
+      rhi->SetPixelTexture(0, fsrA);
+      rhi->DrawFullscreenTriangle();
+      rhi->SetPixelTexture(0, 0);
+    }
     rhi->BindBackbuffer();
   }
 }
@@ -923,7 +1173,23 @@ bool DeferredRenderer::CreateTargets() {
   gPosition = rhi->CreateRenderTarget(w, h, RHIFormat::RGBA16F);
   gDepth = rhi->CreateRenderTarget(w, h, RHIFormat::D24S8);
   gViewport = rhi->CreateRenderTarget(w, h, RHIFormat::RGBA8_UNORM);
-  return gAlbedo != 0 && gNormalRough != 0 && gMetallic != 0 && gPosition != 0 && gDepth != 0 && gViewport != 0;
+  gLight = rhi->CreateRenderTarget(w, h, RHIFormat::RGBA8_UNORM);
+  bloomW = w / 2;
+  if (bloomW < 1) {
+    bloomW = 1;
+  }
+  bloomH = h / 2;
+  if (bloomH < 1) {
+    bloomH = 1;
+  }
+  bloomA = rhi->CreateRenderTarget(bloomW, bloomH, RHIFormat::RGBA8_UNORM);
+  bloomB = rhi->CreateRenderTarget(bloomW, bloomH, RHIFormat::RGBA8_UNORM);
+  int fw = outW > 0 ? outW : w;
+  int fh = outH > 0 ? outH : h;
+  fsrA = rhi->CreateRenderTarget(fw, fh, RHIFormat::RGBA8_UNORM);
+  fsrOut = rhi->CreateRenderTarget(fw, fh, RHIFormat::RGBA8_UNORM);
+  return gAlbedo != 0 && gNormalRough != 0 && gMetallic != 0 && gPosition != 0 && gDepth != 0 && gViewport != 0 && gLight != 0 && bloomA != 0 && bloomB != 0 && fsrA != 0 && fsrOut != 0;
+}
 }
 void DeferredRenderer::DestroyTargets() {
   if (rhi == nullptr) {
@@ -952,6 +1218,26 @@ void DeferredRenderer::DestroyTargets() {
   if (gViewport != 0) {
     rhi->DestroyRenderTarget(gViewport);
     gViewport = 0;
+  }
+  if (gLight != 0) {
+    rhi->DestroyRenderTarget(gLight);
+    gLight = 0;
+  }
+  if (bloomA != 0) {
+    rhi->DestroyRenderTarget(bloomA);
+    bloomA = 0;
+  }
+  if (bloomB != 0) {
+    rhi->DestroyRenderTarget(bloomB);
+    bloomB = 0;
+  }
+  if (fsrA != 0) {
+    rhi->DestroyRenderTarget(fsrA);
+    fsrA = 0;
+  }
+  if (fsrOut != 0) {
+    rhi->DestroyRenderTarget(fsrOut);
+    fsrOut = 0;
   }
 }
 }

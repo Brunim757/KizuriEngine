@@ -34,4 +34,11 @@ void PBR_Spot(
   float falloff,
   const float lightColor[3],
   float outColor[3]);
+float ACESFilm(float x);
+void SkyGradient(
+  const float viewDir[3],
+  const float sunDirTo[3],
+  const float sunColor[3],
+  float sunIntensity,
+  float outColor[3]);
 }

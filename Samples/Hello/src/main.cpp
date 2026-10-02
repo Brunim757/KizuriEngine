@@ -2446,15 +2446,20 @@ bool TestShaderCompile() {
     const char* file;
     const char* profile;
   };
-  Entry entries[5] = {
+  Entry entries[10] = {
     { "GeometryVS.hlsl", "vs_5_0" },
     { "GeometryPS.hlsl", "ps_5_0" },
     { "LightingVS.hlsl", "vs_5_0" },
     { "LightingPS.hlsl", "ps_5_0" },
-    { "DepthVS.hlsl", "vs_5_0" }
+    { "DepthVS.hlsl", "vs_5_0" },
+    { "BloomBrightPS.hlsl", "ps_5_0" },
+    { "BloomBlurPS.hlsl", "ps_5_0" },
+    { "BloomAddPS.hlsl", "ps_5_0" },
+    { "FsrEasuPS.hlsl", "ps_5_0" },
+    { "FsrRcasPS.hlsl", "ps_5_0" }
   };
   const char* dirs[4] = { "Shaders", "../Shaders", "../../Shaders", "build/bin/Release/Shaders" };
-  for (int e = 0; e < 5; ++e) {
+  for (int e = 0; e < 10; ++e) {
     bool found = false;
     for (int d = 0; d < 4; ++d) {
       std::string path = std::string(dirs[d]) + "/" + entries[e].file;
@@ -2620,6 +2625,54 @@ bool TestShadowSpotPoint() {
     return false;
   }
   if (std::fabs(Kizuri::ShadowLinearizeDepth(1.0f, 0.5f, 15.0f) - 15.0f) > 1e-3f) {
+    return false;
+  }
+  return true;
+}
+bool TestACES() {
+  if (Kizuri::ACESFilm(0.0f) != 0.0f || Kizuri::ACESFilm(-1.0f) != 0.0f) {
+    return false;
+  }
+  float a = Kizuri::ACESFilm(0.18f);
+  float b = Kizuri::ACESFilm(1.0f);
+  float c = Kizuri::ACESFilm(10.0f);
+  if (!(a > 0.0f && b > a && c > b && c <= 1.05f)) {
+    return false;
+  }
+  if (std::fabs(b - 0.8f) > 0.05f) {
+    return false;
+  }
+  return true;
+}
+bool TestSky() {
+  float sunTo[3] = { 0.36f, 0.9f, 0.27f };
+  float sunCol[3] = { 1.0f, 0.96f, 0.9f };
+  float disk[3] = { 0.0f, 0.0f, 0.0f };
+  Kizuri::SkyGradient(sunTo, sunTo, sunCol, 2.5f, disk);
+  float haloDir[3] = { 0.9f, 0.5f, 0.0f };
+  float halo[3] = { 0.0f, 0.0f, 0.0f };
+  Kizuri::SkyGradient(haloDir, sunTo, sunCol, 2.5f, halo);
+  if (!(disk[0] > halo[0] && disk[1] > halo[1])) {
+    return false;
+  }
+  float up[3] = { 0.0f, 1.0f, 0.0f };
+  float upCol[3] = { 0.0f, 0.0f, 0.0f };
+  Kizuri::SkyGradient(up, sunTo, sunCol, 2.5f, upCol);
+  float dn[3] = { 0.0f, -1.0f, 0.0f };
+  float dnCol[3] = { 0.0f, 0.0f, 0.0f };
+  Kizuri::SkyGradient(dn, sunTo, sunCol, 2.5f, dnCol);
+  if (!(upCol[2] > dnCol[2])) {
+    return false;
+  }
+  float up2[3] = { 0.0f, 0.0f, 0.0f };
+  Kizuri::SkyGradient(up, sunTo, sunCol, 2.5f, up2);
+  if (upCol[0] != up2[0] || upCol[1] != up2[1] || upCol[2] != up2[2]) {
+    return false;
+  }
+  float setSun[3] = { 0.0f, -1.0f, 0.0f };
+  float night[3] = { 0.0f, 0.0f, 0.0f };
+  Kizuri::SkyGradient(up, setSun, sunCol, 2.5f, night);
+  if (!(night[0] < upCol[0] && night[2] < upCol[2])) {
     return false;
   }
   return true;
@@ -3128,6 +3181,8 @@ int main() {
   failures += Check("ShadowAtlasPlan", TestShadowAtlasPlan());
   failures += Check("ShadowSpotPoint", TestShadowSpotPoint());
   failures += Check("PCSSMath", TestPCSSMath());
+  failures += Check("ACES", TestACES());
+  failures += Check("Sky", TestSky());
   failures += Check("DbTextures", TestDbTextures());
   if (failures == 0) {
     std::printf("KizuriHello: all bootstrap libs linked and functional\n");
