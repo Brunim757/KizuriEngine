@@ -55,11 +55,7 @@ bool ImportTextureMemory(const void* bytes, size_t size, const std::string& keep
     destFormat = DXGI_FORMAT_BC7_UNORM_SRGB;
   }
   DirectX::ScratchImage compressed;
-  DirectX::TEX_COMPRESS_FLAGS cflags = DirectX::TEX_COMPRESS_DEFAULT;
-#ifdef KIZURI_OPENMP
-  cflags = static_cast<DirectX::TEX_COMPRESS_FLAGS>(cflags | DirectX::TEX_COMPRESS_PARALLEL);
-#endif
-  if (FAILED(DirectX::Compress(mipChain.GetImages(), mipChain.GetImageCount(), mipChain.GetMetadata(), destFormat, cflags, DirectX::TEX_THRESHOLD_DEFAULT, compressed))) {
+  if (FAILED(DirectX::Compress(mipChain.GetImages(), mipChain.GetImageCount(), mipChain.GetMetadata(), destFormat, DirectX::TEX_COMPRESS_DEFAULT, DirectX::TEX_THRESHOLD_DEFAULT, compressed))) {
     return false;
   }
   out.guid = keepGuid.empty() ? GenerateGuidString() : keepGuid;
