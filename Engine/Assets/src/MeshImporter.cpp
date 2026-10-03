@@ -310,7 +310,6 @@ bool ImportGltfMesh(const std::string& glbPath, const std::string& keepGuid, Mes
               break;
             }
           }
-          }
           if (!found) {
             MeshMaterialData md;
             md.name = matName;
