@@ -815,6 +815,7 @@ void DeferredRenderer::BeginObjects(const float view[16], const float proj[16]) 
   rhi->SetInputLayout(layout);
   rhi->SetVertexShader(geoVS);
   rhi->SetPixelShader(geoPS);
+  rhi->SetPixelSampler(0, sampler);
   rhi->SetVertexBuffer(vb, 0);
   rhi->SetIndexBuffer(ib);
   rhi->SetVertexConstantBuffer(0, geoCB);
@@ -873,9 +874,10 @@ void DeferredRenderer::DrawObjectEx(const float world[16], RHIBuffer vb, RHIBuff
     mc.albedo[3] = 1.0f;
     mc.params[0] = mat->roughness;
     mc.params[1] = mat->metallic;
-    mc.params[2] = 0.0f;
+    mc.params[2] = mat->albedoTex != 0 ? 1.0f : 0.0f;
     mc.params[3] = 0.0f;
     rhi->UpdateConstantBuffer(matCB, &mc, sizeof(mc));
+    rhi->SetPixelTexture2D(0, mat->albedoTex);
   } else {
     MatConstants mc;
     mc.albedo[0] = material.albedo[0];
@@ -884,9 +886,10 @@ void DeferredRenderer::DrawObjectEx(const float world[16], RHIBuffer vb, RHIBuff
     mc.albedo[3] = 1.0f;
     mc.params[0] = material.roughness;
     mc.params[1] = material.metallic;
-    mc.params[2] = 0.0f;
+    mc.params[2] = material.albedoTex != 0 ? 1.0f : 0.0f;
     mc.params[3] = 0.0f;
     rhi->UpdateConstantBuffer(matCB, &mc, sizeof(mc));
+    rhi->SetPixelTexture2D(0, material.albedoTex);
   }
   rhi->SetVertexBuffer(vb, 0);
   rhi->SetIndexBuffer(ib);

@@ -959,6 +959,14 @@ public:
     ID3D11SamplerState* s = (it == samplers.end()) ? nullptr : it->second.Get();
     context->PSSetSamplers(slot, 1, &s);
   }
+  void SetPixelTexture2D(uint32_t slot, RHITexture tex) override {
+    ID3D11ShaderResourceView* srv = nullptr;
+    auto it = textures.find(tex);
+    if (it != textures.end()) {
+      srv = it->second.srv.Get();
+    }
+    context->PSSetShaderResources(slot, 1, &srv);
+  }
   RHITexture CreateTexture2D(int tw, int th, int mipLevels, RHITextureFormat fmt) override {
     if (tw <= 0 || th <= 0 || mipLevels <= 0 || mipLevels > 16) {
       return 0;

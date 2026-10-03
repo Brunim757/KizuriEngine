@@ -167,6 +167,13 @@ void EditorApp::RenderScene() {
               partMat.albedo[2] = mm.albedo[2];
               partMat.roughness = mm.roughness;
               partMat.metallic = mm.metallic;
+              partMat.albedoTex = 0;
+              if (!mm.albedoTexGuid.empty()) {
+                const TextureRecord* trec = assets.GetTexByGuid(mm.albedoTexGuid);
+                if (trec != nullptr && trec->loaded && !trec->data.mips.empty() && trec->residentLevels >= static_cast<int>(trec->data.mips.size()) && trec->gpu != 0) {
+                  partMat.albedoTex = trec->gpu;
+                }
+              }
               useMat = &partMat;
             }
             renderer.DrawObjectEx(world, rec->gpuVB, rec->gpuIB, part.indexOffset, part.indexCount, useMat);

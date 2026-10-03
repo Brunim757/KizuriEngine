@@ -303,6 +303,11 @@ public:
     (void)sampler;
     Note(false);
   }
+  void SetPixelTexture2D(uint32_t slot, RHITexture tex) override {
+    (void)slot;
+    (void)tex;
+    Note(false);
+  }
   RHIRenderTarget CreateShadowCube(int size) override {
     if (size <= 0) {
       return 0;

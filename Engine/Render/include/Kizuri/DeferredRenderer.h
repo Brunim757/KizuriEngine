@@ -7,6 +7,7 @@ struct DeferredMaterial {
   float albedo[3];
   float roughness;
   float metallic;
+  RHITexture albedoTex = 0;
 };
 struct DeferredLight {
   float direction[3];

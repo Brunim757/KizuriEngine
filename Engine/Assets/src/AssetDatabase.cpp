@@ -1064,7 +1064,32 @@ int AssetDatabase::SelectMipLevel(float dist, int mipCount) {
   return want;
 }
 void AssetDatabase::UpdateStreaming(const float cameraPos[3], const std::vector<MeshUse>& uses) {
+  std::vector<size_t> order;
+  order.reserve(uses.size());
   for (size_t u = 0; u < uses.size(); ++u) {
+    order.push_back(u);
+  }
+  for (size_t i = 0; i < order.size(); ++i) {
+    for (size_t j = i + 1; j < order.size(); ++j) {
+      const MeshUse& a = uses[order[i]];
+      const MeshUse& b = uses[order[j]];
+      float adx = a.pos[0] - cameraPos[0];
+      float ady = a.pos[1] - cameraPos[1];
+      float adz = a.pos[2] - cameraPos[2];
+      float bdx = b.pos[0] - cameraPos[0];
+      float bdy = b.pos[1] - cameraPos[1];
+      float bdz = b.pos[2] - cameraPos[2];
+      float da = adx * adx + ady * ady + adz * adz;
+      float db = bdx * bdx + bdy * bdy + bdz * bdz;
+      if (db < da) {
+        size_t tmp = order[i];
+        order[i] = order[j];
+        order[j] = tmp;
+      }
+    }
+  }
+  for (size_t oi = 0; oi < order.size(); ++oi) {
+    size_t u = order[oi];
     auto mr = records.find(uses[u].meshGuid);
     if (mr == records.end() || !mr->second.loaded) {
       continue;

@@ -3,6 +3,8 @@ cbuffer MatCB : register(b0)
     float4 Albedo;
     float4 Params;
 };
+Texture2D AlbedoTX : register(t0);
+SamplerState LinearSampler : register(s0);
 struct PSIn
 {
     float4 pos : SV_Position;
@@ -21,7 +23,11 @@ PSOut main(PSIn pin)
 {
     PSOut pout;
     float3 n = normalize(pin.wnrm);
-    pout.albedo = float4(Albedo.rgb, 1.0);
+    float3 alb = Albedo.rgb;
+    if (Params.z > 0.5) {
+        alb = AlbedoTX.Sample(LinearSampler, pin.uv).rgb;
+    }
+    pout.albedo = float4(alb, 1.0);
     pout.nrmRough = float4(n, Params.x);
     pout.metallic = float4(Params.y, 0.0, 0.0, 1.0);
     pout.wpos = float4(pin.wpos, 1.0);
