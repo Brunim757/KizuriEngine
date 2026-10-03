@@ -1496,9 +1496,25 @@ bool TestTexPixels() {
   int sx1[4] = { spx[(15 * 16 + 15) * 4 + 0], spx[(15 * 16 + 15) * 4 + 1], spx[(15 * 16 + 15) * 4 + 2], spx[(15 * 16 + 15) * 4 + 3] };
   int dx0[4] = { dp[0], dp[1], dp[2], dp[3] };
   int dx1[4] = { dp[(15 * 16 + 15) * 4 + 0], dp[(15 * 16 + 15) * 4 + 1], dp[(15 * 16 + 15) * 4 + 2], dp[(15 * 16 + 15) * 4 + 3] };
+  long long sumSq = 0;
+  int over10 = 0;
+  for (int y = 0; y < 16; ++y) {
+    for (int x = 0; x < 16; ++x) {
+      for (int c = 0; c < 3; ++c) {
+        int i = (y * 16 + x) * 4 + c;
+        int d = static_cast<int>(dp[i]) - static_cast<int>(spx[i]);
+        sumSq += static_cast<long long>(d) * d;
+        if (d > 10 || d < -10) {
+          ++over10;
+        }
+      }
+    }
+  }
+  double rms = std::sqrt(static_cast<double>(sumSq) / (16.0 * 16.0 * 3.0));
   stbi_image_free(spx);
   std::printf("texpixels: maxAbs=%d tl=%d,%d,%d br=%d,%d,%d\n", maxAbs, dx0[0], dx0[1], dx0[2], dx1[0], dx1[1], dx1[2]);
   std::printf("texpixels: at=(%d,%d) ch=%d src=%d dec=%d\n", maxX, maxY, maxC, maxS, maxD);
+  std::printf("texpixels: rms=%.2f over10=%d\n", rms, over10);
   if (maxAbs > 32) {
     return false;
   }
