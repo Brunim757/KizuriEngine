@@ -264,37 +264,6 @@ void EditorApp::DrawViewport() {
   if (ImGui::RadioButton("Scale", curOp == ImGuizmo::SCALE)) {
     gizmoOp = static_cast<int>(ImGuizmo::SCALE);
   }
-  ImGui::SameLine();
-  ImGui::Checkbox("Debug CSM", &debugCascades);
-  ImGui::SameLine();
-  ImGui::Checkbox("ACES", &viewACES);
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(110.0f);
-  ImGui::SliderFloat("Exposure", &viewExposure, 0.25f, 4.0f);
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(110.0f);
-  ImGui::SliderFloat("Bloom", &viewBloom, 0.0f, 2.0f);
-  ImGui::SetNextItemWidth(110.0f);
-  ImGui::SliderFloat("Render Scale", &viewScale, 0.5f, 1.0f);
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(110.0f);
-  ImGui::SliderFloat("Sharp", &viewSharp, 0.0f, 1.0f);
-  ImGui::SameLine();
-  ImGui::Checkbox("SSAO", &viewSsao);
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(110.0f);
-  ImGui::SliderFloat("SsaoInt", &viewSsaoIntensity, 0.0f, 2.0f);
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(110.0f);
-  ImGui::SliderFloat("SsaoRad", &viewSsaoRadius, 0.1f, 2.0f);
-  ImGui::SameLine();
-  ImGui::Checkbox("Fog", &viewFog);
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(110.0f);
-  ImGui::SliderFloat("FogDen", &viewFogDensity, 0.0f, 0.05f);
-  ImGui::SameLine();
-  ImGui::SetNextItemWidth(110.0f);
-  ImGui::ColorEdit3("FogCol", viewFogColor);
   if (ImGui::IsWindowHovered() && !ImGui::GetIO().WantTextInput && !RawInputPoll::IsMouseDown(VK_RBUTTON)) {
     if (ImGui::IsKeyPressed(ImGuiKey_W, false)) {
       gizmoOp = static_cast<int>(ImGuizmo::TRANSLATE);
@@ -662,6 +631,36 @@ void EditorApp::DrawLightGizmo() {
       }
     }
   }
+}
+void EditorApp::DrawSettings() {
+  ImGui::Begin("Settings", &showSettings);
+  if (ImGui::BeginTabBar("SettingsTabs")) {
+    if (ImGui::BeginTabItem("Post")) {
+      ImGui::SliderFloat("Exposure", &viewExposure, 0.25f, 4.0f);
+      ImGui::Checkbox("ACES", &viewACES);
+      ImGui::SliderFloat("Bloom", &viewBloom, 0.0f, 2.0f);
+      ImGui::Separator();
+      ImGui::Checkbox("SSAO", &viewSsao);
+      ImGui::SliderFloat("SSAO Intensity", &viewSsaoIntensity, 0.0f, 2.0f);
+      ImGui::SliderFloat("SSAO Radius", &viewSsaoRadius, 0.1f, 2.0f);
+      ImGui::Separator();
+      ImGui::Checkbox("Fog", &viewFog);
+      ImGui::SliderFloat("Fog Density", &viewFogDensity, 0.0f, 0.05f);
+      ImGui::ColorEdit3("Fog Color", viewFogColor);
+      ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem("Render")) {
+      ImGui::SliderFloat("Render Scale", &viewScale, 0.5f, 1.0f);
+      ImGui::SliderFloat("Sharpness", &viewSharp, 0.0f, 1.0f);
+      ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem("Debug")) {
+      ImGui::Checkbox("Debug CSM", &debugCascades);
+      ImGui::EndTabItem();
+    }
+    ImGui::EndTabBar();
+  }
+  ImGui::End();
 }
 void EditorApp::DrawHierarchy() {
   ImGui::Begin("Hierarchy", &showHierarchy);

@@ -25,6 +25,7 @@ EditorApp::EditorApp()
   , showViewport(true)
   , showAssetBrowser(true)
   , showAbout(false)
+  , showSettings(false)
   , debugCascades(false)
   , viewExposure(1.0f)
   , viewACES(true)
@@ -35,7 +36,7 @@ EditorApp::EditorApp()
   , viewSsaoIntensity(1.0f)
   , viewSsaoRadius(0.5f)
   , viewFog(true)
-  , viewFogDensity(0.004f)
+  , viewFogDensity(0.002f)
   , viewX(0.0f)
   , viewY(0.0f)
   , viewW(1280.0f)
@@ -545,6 +546,9 @@ void EditorApp::Frame() {
   if (showAssetBrowser) {
     DrawAssetBrowser();
   }
+  if (showSettings) {
+    DrawSettings();
+  }
   if (showAbout) {
     ImGui::Begin("About Kizuri", &showAbout);
     ImGui::Text("Kizuri Engine - Editor Shell Fase 3");
@@ -617,6 +621,7 @@ void EditorApp::DrawMenuBar() {
       ImGui::MenuItem("Inspector", nullptr, &showInspector);
       ImGui::MenuItem("Console", nullptr, &showConsole);
       ImGui::MenuItem("Asset Browser", nullptr, &showAssetBrowser);
+      ImGui::MenuItem("Settings", nullptr, &showSettings);
       ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Help")) {

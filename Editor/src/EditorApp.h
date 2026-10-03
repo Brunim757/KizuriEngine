@@ -45,6 +45,7 @@ struct EditorApp {
   bool showViewport;
   bool showAssetBrowser;
   bool showAbout;
+  bool showSettings;
   bool debugCascades;
   float viewExposure;
   bool viewACES;
@@ -116,6 +117,7 @@ struct EditorApp {
   void DrawToasts();
   void Announce(LogLevel level, const std::string& text);
   void DrawAssetBrowser();
+  void DrawSettings();
   void DrawMeshSection(Entity* e);
   void DrawLightGizmo();
   std::string ResolveAssetsDir();

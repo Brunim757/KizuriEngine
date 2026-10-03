@@ -206,7 +206,7 @@ float3 ApplyFog(float3 col, float3 rayDir, float tMax, float2 suv)
     float3 toSun = normalize(SkySun.xyz);
     float3 sunCol = SkyColor.rgb * max(SkySun.w, 0.0);
     float cosT = max(dot(rayDir, toSun), 0.0);
-    float ph = 0.5 + 0.5 * pow(cosT, 4.0);
+    float ph = 0.15 + 0.85 * pow(cosT, 8.0);
     float trans = 1.0;
     float3 insc = float3(0.0, 0.0, 0.0);
     for (int s = 0; s < 8; ++s) {
@@ -324,7 +324,7 @@ float4 main(PSIn pin) : SV_Target
         float sint = max(SkySun.w, 1e-3);
         float3 sk = SkyGradient(ray, normalize(SkySun.xyz), SkyColor.rgb, sint);
         if (FogInfo.x > 0.5) {
-            sk = ApplyFog(sk, ray, 300.0, pin.uv);
+            sk = ApplyFog(sk, ray, 150.0, pin.uv);
         }
         float3 se = sk * GradeInfo.x;
         float3 st = se;
