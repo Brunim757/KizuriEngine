@@ -1430,9 +1430,11 @@ bool TestTexPixels() {
   }
   Kizuri::TextureAssetData tdata;
   if (!Kizuri::ImportTextureFile("Samples/Assets/brick.bmp", "", tdata)) {
+    std::printf("texpixels: import failed\n");
     stbi_image_free(spx);
     return false;
   }
+  std::printf("texpixels: %ux%u mips=%llu fmt=%d srgb=%d\n", tdata.width, tdata.height, (unsigned long long)tdata.mips.size(), (int)tdata.format, tdata.srgb ? 1 : 0);
   if (tdata.width != 16 || tdata.height != 16 || tdata.mips.empty()) {
     stbi_image_free(spx);
     return false;
@@ -1462,6 +1464,7 @@ bool TestTexPixels() {
   DirectX::ScratchImage dec;
   bool ok = SUCCEEDED(DirectX::Decompress(&img, 1, meta, DXGI_FORMAT_R8G8B8A8_UNORM, dec));
   if (!ok || dec.GetPixels() == nullptr) {
+    std::printf("texpixels: decompress failed\n");
     stbi_image_free(spx);
     return false;
   }
@@ -1481,6 +1484,7 @@ bool TestTexPixels() {
   int dx0[4] = { dp[0], dp[1], dp[2], dp[3] };
   int dx1[4] = { dp[(15 * 16 + 15) * 4 + 0], dp[(15 * 16 + 15) * 4 + 1], dp[(15 * 16 + 15) * 4 + 2], dp[(15 * 16 + 15) * 4 + 3] };
   stbi_image_free(spx);
+  std::printf("texpixels: maxAbs=%d tl=%d,%d,%d br=%d,%d,%d\n", maxAbs, dx0[0], dx0[1], dx0[2], dx1[0], dx1[1], dx1[2]);
   if (maxAbs > 32) {
     return false;
   }
