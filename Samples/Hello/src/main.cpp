@@ -2012,7 +2012,7 @@ bool TestTexImportAlpha() {
     fs::remove_all(dir, ec);
     return false;
   }
-  if (ta.format != Kizuri::TexFormat::Bc3) {
+  if (ta.format != Kizuri::TexFormat::Bc7) {
     fs::remove_all(dir, ec);
     return false;
   }
@@ -2075,7 +2075,7 @@ bool TestTexImport() {
     fs::remove_all(dir, ec);
     return false;
   }
-  if (ta.format != Kizuri::TexFormat::Bc3) {
+  if (ta.format != Kizuri::TexFormat::Bc7) {
     fs::remove_all(dir, ec);
     return false;
   }
