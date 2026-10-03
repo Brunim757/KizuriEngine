@@ -39,6 +39,7 @@
 #include <cmath>
 #include <cstring>
 #include <atomic>
+#include <chrono>
 #ifdef _WIN32
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -1568,12 +1569,14 @@ bool TestMeshImportNormals() {
   float nrm[9] = { 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f };
   unsigned char uvb[6] = { 0, 0, 255, 0, 0, 255 };
   float uvf[6] = { 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f };
+  float uv1[6] = { 0.25f, 0.75f, 0.25f, 0.75f, 0.25f, 0.75f };
   uint16_t idx[3] = { 0, 1, 2 };
   bin.insert(bin.end(), reinterpret_cast<unsigned char*>(pos), reinterpret_cast<unsigned char*>(pos) + 36);
   bin.insert(bin.end(), reinterpret_cast<unsigned char*>(nrm), reinterpret_cast<unsigned char*>(nrm) + 36);
   bin.insert(bin.end(), uvb, uvb + 6);
   bin.insert(bin.end(), reinterpret_cast<unsigned char*>(uvf), reinterpret_cast<unsigned char*>(uvf) + 24);
   bin.insert(bin.end(), reinterpret_cast<unsigned char*>(idx), reinterpret_cast<unsigned char*>(idx) + 6);
+  bin.insert(bin.end(), reinterpret_cast<unsigned char*>(uv1), reinterpret_cast<unsigned char*>(uv1) + 24);
   {
     FILE* fp = std::fopen((dir / "model.bin").string().c_str(), "wb");
     if (fp == nullptr) {
@@ -1591,21 +1594,27 @@ bool TestMeshImportNormals() {
   json += "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":36},";
   json += "{\"buffer\":0,\"byteOffset\":72,\"byteLength\":6},";
   json += "{\"buffer\":0,\"byteOffset\":78,\"byteLength\":24},";
-  json += "{\"buffer\":0,\"byteOffset\":102,\"byteLength\":6}],";
+  json += "{\"buffer\":0,\"byteOffset\":102,\"byteLength\":6},";
+  json += "{\"buffer\":0,\"byteOffset\":108,\"byteLength\":24}],";
   json += "\"accessors\":[";
   json += "{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"},";
   json += "{\"bufferView\":1,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"},";
   json += "{\"bufferView\":2,\"componentType\":5121,\"normalized\":true,\"count\":3,\"type\":\"VEC2\"},";
   json += "{\"bufferView\":3,\"componentType\":5126,\"count\":3,\"type\":\"VEC2\"},";
-  json += "{\"bufferView\":4,\"componentType\":5123,\"count\":3,\"type\":\"SCALAR\"}],";
+  json += "{\"bufferView\":4,\"componentType\":5123,\"count\":3,\"type\":\"SCALAR\"},";
+  json += "{\"bufferView\":5,\"componentType\":5126,\"count\":3,\"type\":\"VEC2\"}],";
   json += "\"images\":[{\"uri\":\"brick.bmp\"}],";
   json += "\"textures\":[{\"source\":0}],";
-  json += "\"materials\":[{\"name\":\"Shared\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[1,1,1,1],\"baseColorTexture\":{\"index\":0}}}],";
+  json += "\"materials\":[{\"name\":\"Shared\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[1,1,1,1],\"baseColorTexture\":{\"index\":0}}},";
+  json += "{\"name\":\"Scaled\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[1,1,1,1],\"baseColorTexture\":{\"index\":0,\"extensions\":{\"KHR_texture_transform\":{\"offset\":[0.5,0.0],\"rotation\":0.0,\"scale\":[2.0,2.0]}}}}}],";
+  json += "\"extensionsUsed\":[\"KHR_texture_transform\"],";
   json += "\"meshes\":[{\"primitives\":[";
   json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":2},\"indices\":4,\"material\":0},";
   json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":3},\"indices\":4,\"material\":0},";
   json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":3},\"indices\":4},";
-  json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1},\"indices\":4,\"material\":0}";
+  json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1},\"indices\":4,\"material\":0},";
+  json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_1\":5},\"indices\":4,\"material\":0},";
+  json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":3},\"indices\":4,\"material\":1}";
   json += "]}],";
   json += "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}";
   {
@@ -1623,19 +1632,27 @@ bool TestMeshImportNormals() {
     fs::remove_all(dir, ec);
     return false;
   }
-  if (data.materials.size() != 1 || data.materials[0].albedoTexGuid.empty()) {
+  if (data.materials.size() != 2 || data.materials[0].albedoTexGuid.empty()) {
     fs::remove_all(dir, ec);
     return false;
   }
-  if (data.parts.size() != 4) {
+  if (data.materials[0].texCoord != 0 || data.materials[1].texCoord != 0) {
     fs::remove_all(dir, ec);
     return false;
   }
-  for (size_t i = 0; i < 4; ++i) {
+  if (data.parts.size() != 6) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  for (size_t i = 0; i < 5; ++i) {
     if (data.parts[i].material != 0) {
       fs::remove_all(dir, ec);
       return false;
     }
+  }
+  if (data.parts[5].material != 1) {
+    fs::remove_all(dir, ec);
+    return false;
   }
   if (data.uvs.size() < 24) {
     fs::remove_all(dir, ec);
@@ -1649,6 +1666,24 @@ bool TestMeshImportNormals() {
     fs::remove_all(dir, ec);
     return false;
   }
+  if (data.uvs.size() < 36) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  for (size_t i = 24; i < 30; ++i) {
+    float want = (i % 2 == 0) ? 0.25f : 0.75f;
+    if (std::fabs(data.uvs[i] - want) > 1e-5f) {
+      fs::remove_all(dir, ec);
+      return false;
+    }
+  }
+  float baked[6] = { 0.5f, 0.0f, 2.5f, 0.0f, 0.5f, 2.0f };
+  for (size_t i = 0; i < 6; ++i) {
+    if (std::fabs(data.uvs[30 + i] - baked[i]) > 1e-4f) {
+      fs::remove_all(dir, ec);
+      return false;
+    }
+  }
   bool sawNoMat = false;
   bool sawNoUV = false;
   for (size_t i = 0; i < log.Count(); ++i) {
@@ -1656,7 +1691,7 @@ bool TestMeshImportNormals() {
     if (t.find("no material") != std::string::npos) {
       sawNoMat = true;
     }
-    if (t.find("TEXCOORD_0") != std::string::npos) {
+    if (t.find("TEXCOORD") != std::string::npos) {
       sawNoUV = true;
     }
   }
@@ -1679,10 +1714,13 @@ bool TestMeshImportTextured() {
     return false;
   }
   Kizuri::MeshAssetData data;
+  auto t0 = std::chrono::steady_clock::now();
   if (!Kizuri::ImportGltfMesh((dir / "brickbox.gltf").string(), "", data, nullptr)) {
     fs::remove_all(dir, ec);
     return false;
   }
+  auto t1 = std::chrono::steady_clock::now();
+  std::printf("meshimport: brickbox %lldms\n", static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count()));
   if (data.materials.empty() || data.materials[0].albedoTexGuid.empty()) {
     fs::remove_all(dir, ec);
     return false;

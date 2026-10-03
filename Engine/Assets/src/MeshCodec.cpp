@@ -88,7 +88,7 @@ bool AppendMeshFlatBuffer(const MeshAssetData& data, size_t vertexCount, flatbuf
     const MeshMaterialData& m = data.materials[i];
     auto fbName = builder.CreateString(m.name);
     auto fbTex = builder.CreateString(m.albedoTexGuid);
-    fbMats.push_back(KizuriAssets::CreateMaterialSlot(builder, fbName, m.albedo[0], m.albedo[1], m.albedo[2], m.metallic, m.roughness, fbTex));
+    fbMats.push_back(KizuriAssets::CreateMaterialSlot(builder, fbName, m.albedo[0], m.albedo[1], m.albedo[2], m.metallic, m.roughness, fbTex, m.texCoord));
   }
   auto fbMatsVec = builder.CreateVector(fbMats);
   std::vector<KizuriAssets::MeshPart> fbParts;
@@ -215,6 +215,7 @@ bool DecodeMeshMemory(const void* bytes, size_t size, MeshAssetData& out) {
       md.metallic = m->metallic();
       md.roughness = m->roughness();
       md.albedoTexGuid = m->albedoTexGuid() != nullptr ? m->albedoTexGuid()->str() : "";
+      md.texCoord = m->texCoord();
       out.materials.push_back(md);
     }
   }

@@ -250,6 +250,7 @@ bool ImportGltfMesh(const std::string& glbPath, const std::string& keepGuid, Mes
         const cgltf_accessor* posAcc = nullptr;
         const cgltf_accessor* nrmAcc = nullptr;
         const cgltf_accessor* uvAcc = nullptr;
+        const cgltf_accessor* uvAcc1 = nullptr;
         for (size_t ai = 0; ai < prim.attributes_count; ++ai) {
           if (std::strcmp(prim.attributes[ai].name, "POSITION") == 0) {
             posAcc = prim.attributes[ai].data;
@@ -257,7 +258,34 @@ bool ImportGltfMesh(const std::string& glbPath, const std::string& keepGuid, Mes
             nrmAcc = prim.attributes[ai].data;
           } else if (std::strcmp(prim.attributes[ai].name, "TEXCOORD_0") == 0) {
             uvAcc = prim.attributes[ai].data;
+          } else if (std::strcmp(prim.attributes[ai].name, "TEXCOORD_1") == 0) {
+            uvAcc1 = prim.attributes[ai].data;
           }
+        }
+        int uvSet = 0;
+        float uvOff[2] = { 0.0f, 0.0f };
+        float uvRot = 0.0f;
+        float uvScale[2] = { 1.0f, 1.0f };
+        if (prim.material != nullptr && prim.material->has_pbr_metallic_roughness) {
+          const cgltf_texture_view& tv = prim.material->pbr_metallic_roughness.base_color_texture;
+          if (tv.texture != nullptr) {
+            uvSet = tv.texcoord;
+            if (tv.has_transform) {
+              uvOff[0] = tv.transform.offset[0];
+              uvOff[1] = tv.transform.offset[1];
+              uvRot = tv.transform.rotation;
+              uvScale[0] = tv.transform.scale[0];
+              uvScale[1] = tv.transform.scale[1];
+              if (tv.transform.has_texcoord) {
+                uvSet = tv.transform.texcoord;
+              }
+            }
+          }
+        }
+        const cgltf_accessor* uvSel = (uvSet == 1 && uvAcc1 != nullptr) ? uvAcc1 : uvAcc;
+        if (uvSet != 0 && uvSet != 1) {
+          uvSet = 0;
+          uvSel = uvAcc;
         }
         if (posAcc == nullptr || posAcc->count == 0) {
           continue;
@@ -283,10 +311,16 @@ bool ImportGltfMesh(const std::string& glbPath, const std::string& keepGuid, Mes
             ok = false;
             break;
           }
-          if (uvAcc != nullptr && !ReadVec2(uvAcc, vi, uv)) {
+          if (uvSel != nullptr && !ReadVec2(uvSel, vi, uv)) {
             ok = false;
             break;
           }
+          float ux = uv[0] * uvScale[0];
+          float uy = uv[1] * uvScale[1];
+          float uc = cosf(uvRot);
+          float us = sinf(uvRot);
+          uv[0] = ux * uc - uy * us + uvOff[0];
+          uv[1] = ux * us + uy * uc + uvOff[1];
           out.positions.push_back(p[0]);
           out.positions.push_back(p[1]);
           out.positions.push_back(p[2]);
@@ -319,6 +353,7 @@ bool ImportGltfMesh(const std::string& glbPath, const std::string& keepGuid, Mes
             md.metallic = 0.0f;
             md.roughness = 0.5f;
             md.albedoTexGuid = "";
+            md.texCoord = uvSet;
             if (prim.material->has_pbr_metallic_roughness) {
               md.albedo[0] = prim.material->pbr_metallic_roughness.base_color_factor[0];
               md.albedo[1] = prim.material->pbr_metallic_roughness.base_color_factor[1];
@@ -327,6 +362,18 @@ bool ImportGltfMesh(const std::string& glbPath, const std::string& keepGuid, Mes
               md.roughness = prim.material->pbr_metallic_roughness.roughness_factor;
               const cgltf_texture* ctex = prim.material->pbr_metallic_roughness.base_color_texture.texture;
               if (ctex != nullptr && ctex->image != nullptr) {
+                int wrapS = 10497;
+                int wrapT = 10497;
+                if (ctex->sampler != nullptr) {
+                  wrapS = ctex->sampler->wrap_s;
+                  wrapT = ctex->sampler->wrap_t;
+                  if (wrapS != 10497 && wrapS != 33071) {
+                    wrapS = 10497;
+                  }
+                  if (wrapT != 10497 && wrapT != 33071) {
+                    wrapT = 10497;
+                  }
+                }
                 std::vector<unsigned char> imgBytes;
                 std::string imgName;
                 if (ResolveGltfImage(ctex->image, glbPath, imgBytes, imgName)) {
@@ -342,10 +389,16 @@ bool ImportGltfMesh(const std::string& glbPath, const std::string& keepGuid, Mes
                   if (ImportTextureMemory(imgBytes.data(), imgBytes.size(), keepTex, tdata, imgName, false, glbPath, hash)) {
                     imgBytes.clear();
                     imgBytes.shrink_to_fit();
+                    tdata.wrapS = wrapS;
+                    tdata.wrapT = wrapT;
                     if (EncodeTextureFile(tdata, texOut)) {
                       md.albedoTexGuid = tdata.guid;
                     }
+                  } else if (log != nullptr) {
+                    log->Add(LogLevel::Warning, std::string("Prim ") + std::to_string(pi) + " image '" + imgName + "' could not be decoded");
                   }
+                } else if (log != nullptr) {
+                  log->Add(LogLevel::Warning, std::string("Prim ") + std::to_string(pi) + " texture image could not be resolved");
                 }
               }
             }
@@ -360,6 +413,8 @@ bool ImportGltfMesh(const std::string& glbPath, const std::string& keepGuid, Mes
           md.albedo[2] = 1.0f;
           md.metallic = 0.0f;
           md.roughness = 0.5f;
+          md.albedoTexGuid.clear();
+          md.texCoord = 0;
           out.materials.push_back(md);
         }
         MeshPartData part;
@@ -374,8 +429,8 @@ bool ImportGltfMesh(const std::string& glbPath, const std::string& keepGuid, Mes
             if (wantsTex && wmd.albedoTexGuid.empty()) {
               log->Add(LogLevel::Warning, std::string("Prim ") + std::to_string(pi) + " texture image could not be resolved");
             }
-            if (!wmd.albedoTexGuid.empty() && uvAcc == nullptr) {
-              log->Add(LogLevel::Warning, std::string("Prim ") + std::to_string(pi) + " has texture but no TEXCOORD_0; single texel");
+            if (!wmd.albedoTexGuid.empty() && uvAcc == nullptr && uvAcc1 == nullptr) {
+              log->Add(LogLevel::Warning, std::string("Prim ") + std::to_string(pi) + " has texture but no TEXCOORD; single texel");
             }
           }
         }
@@ -416,6 +471,8 @@ bool ImportGltfMesh(const std::string& glbPath, const std::string& keepGuid, Mes
     md.albedo[2] = 1.0f;
     md.metallic = 0.0f;
     md.roughness = 0.5f;
+    md.albedoTexGuid.clear();
+    md.texCoord = 0;
     out.materials.push_back(md);
     for (size_t i = 0; i < out.parts.size(); ++i) {
       out.parts[i].material = 0;

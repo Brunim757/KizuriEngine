@@ -9,6 +9,7 @@ struct MeshMaterialData {
   float metallic;
   float roughness;
   std::string albedoTexGuid;
+  int texCoord;
 };
 struct MeshPartData {
   uint32_t indexOffset;

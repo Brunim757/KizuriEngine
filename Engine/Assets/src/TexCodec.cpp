@@ -49,7 +49,7 @@ bool EncodeTextureMemory(const TextureAssetData& data, std::vector<unsigned char
   auto fbMipsVec = builder.CreateVector(fbMips);
   auto fbGuid = builder.CreateString(data.guid);
   auto fbSourcePath = builder.CreateString(data.sourcePath);
-  auto tex = KizuriAssets::CreateTextureAsset(builder, fbGuid, data.width, data.height, static_cast<uint32_t>(data.mips.size()), static_cast<uint32_t>(data.format), data.srgb, data.hasSource, fbSourcePath, data.sourceHash, static_cast<int64_t>(data.sourceTimestamp), fbMipsVec);
+  auto tex = KizuriAssets::CreateTextureAsset(builder, fbGuid, data.width, data.height, static_cast<uint32_t>(data.mips.size()), static_cast<uint32_t>(data.format), data.srgb, data.hasSource, fbSourcePath, data.sourceHash, static_cast<int64_t>(data.sourceTimestamp), data.wrapS, data.wrapT, fbMipsVec);
   builder.Finish(tex);
   size_t fbSize = builder.GetSize();
   size_t bound = ZSTD_compressBound(fbSize);
@@ -102,6 +102,14 @@ bool DecodeTextureMemory(const void* bytes, size_t size, TextureAssetData& out) 
   out.height = tex->height();
   out.format = static_cast<TexFormat>(tex->format());
   out.srgb = tex->srgb();
+  out.wrapS = tex->wrapS();
+  out.wrapT = tex->wrapT();
+  if (out.wrapS != 10497 && out.wrapS != 33071 && out.wrapS != 33648) {
+    out.wrapS = 10497;
+  }
+  if (out.wrapT != 10497 && out.wrapT != 33071 && out.wrapT != 33648) {
+    out.wrapT = 10497;
+  }
   for (uint32_t i = 0; i < tex->mips()->size(); ++i) {
     const KizuriAssets::MipLevel* mip = tex->mips()->Get(i);
     TextureMipData md;
@@ -142,7 +150,7 @@ bool EncodeTextureFile(const TextureAssetData& data, const std::string& path) {
   auto fbMipsVec = builder.CreateVector(fbMips);
   auto fbGuid = builder.CreateString(data.guid);
   auto fbSourcePath = builder.CreateString(data.sourcePath);
-  auto tex = KizuriAssets::CreateTextureAsset(builder, fbGuid, data.width, data.height, static_cast<uint32_t>(data.mips.size()), static_cast<uint32_t>(data.format), data.srgb, data.hasSource, fbSourcePath, data.sourceHash, static_cast<int64_t>(data.sourceTimestamp), fbMipsVec);
+  auto tex = KizuriAssets::CreateTextureAsset(builder, fbGuid, data.width, data.height, static_cast<uint32_t>(data.mips.size()), static_cast<uint32_t>(data.format), data.srgb, data.hasSource, fbSourcePath, data.sourceHash, static_cast<int64_t>(data.sourceTimestamp), data.wrapS, data.wrapT, fbMipsVec);
   builder.Finish(tex);
   size_t fbSize = builder.GetSize();
   FILE* fp = std::fopen(path.c_str(), "wb");

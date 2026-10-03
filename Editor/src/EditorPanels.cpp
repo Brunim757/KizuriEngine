@@ -168,10 +168,12 @@ void EditorApp::RenderScene() {
               partMat.roughness = mm.roughness;
               partMat.metallic = mm.metallic;
               partMat.albedoTex = 0;
+              partMat.texRepeat = false;
               if (!mm.albedoTexGuid.empty()) {
                 const TextureRecord* trec = assets.GetTexByGuid(mm.albedoTexGuid);
                 if (trec != nullptr && trec->loaded && !trec->data.mips.empty() && trec->residentLevels >= static_cast<int>(trec->data.mips.size()) && trec->gpu != 0) {
                   partMat.albedoTex = trec->gpu;
+                  partMat.texRepeat = trec->wrapS == 10497 || trec->wrapT == 10497;
                 }
               }
               useMat = &partMat;

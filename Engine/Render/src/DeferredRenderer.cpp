@@ -120,6 +120,7 @@ DeferredRenderer::DeferredRenderer()
   , fogDensity(0.002f)
   , layout(0)
   , sampler(0)
+  , wrapSampler(0)
   , indexCount(0)
   , viewX(0.0f)
   , viewY(0.0f)
@@ -242,6 +243,10 @@ bool DeferredRenderer::Initialize(IRHI* r, int vw, int vh, const char* shaderDir
   }
   sampler = rhi->CreateSamplerLinear();
   if (sampler == 0) {
+    return false;
+  }
+  wrapSampler = rhi->CreateSamplerWrap();
+  if (wrapSampler == 0) {
     return false;
   }
   shadowAtlas = rhi->CreateRenderTarget(ShadowAtlasSize, ShadowAtlasSize, RHIFormat::R32_DEPTH);
@@ -878,6 +883,7 @@ void DeferredRenderer::DrawObjectEx(const float world[16], RHIBuffer vb, RHIBuff
     mc.params[3] = 0.0f;
     rhi->UpdateConstantBuffer(matCB, &mc, sizeof(mc));
     rhi->SetPixelTexture2D(0, mat->albedoTex);
+    rhi->SetPixelSampler(0, mat->texRepeat ? wrapSampler : sampler);
   } else {
     MatConstants mc;
     mc.albedo[0] = material.albedo[0];
@@ -890,6 +896,7 @@ void DeferredRenderer::DrawObjectEx(const float world[16], RHIBuffer vb, RHIBuff
     mc.params[3] = 0.0f;
     rhi->UpdateConstantBuffer(matCB, &mc, sizeof(mc));
     rhi->SetPixelTexture2D(0, material.albedoTex);
+    rhi->SetPixelSampler(0, material.texRepeat ? wrapSampler : sampler);
   }
   rhi->SetVertexBuffer(vb, 0);
   rhi->SetIndexBuffer(ib);

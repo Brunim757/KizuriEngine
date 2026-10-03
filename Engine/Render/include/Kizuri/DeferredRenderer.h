@@ -8,6 +8,7 @@ struct DeferredMaterial {
   float roughness;
   float metallic;
   RHITexture albedoTex = 0;
+  bool texRepeat = false;
 };
 struct DeferredLight {
   float direction[3];
@@ -175,6 +176,7 @@ private:
   float fogColor[3];
   RHIInputLayout layout;
   RHISampler sampler;
+  RHISampler wrapSampler;
   uint32_t indexCount;
   float viewX;
   float viewY;

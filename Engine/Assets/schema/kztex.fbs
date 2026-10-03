@@ -16,6 +16,8 @@ table TextureAsset {
   sourcePath:string;
   sourceHash:ulong;
   sourceTimestamp:long;
+  wrapS:int;
+  wrapT:int;
   mips:[MipLevel];
 }
 root_type TextureAsset;

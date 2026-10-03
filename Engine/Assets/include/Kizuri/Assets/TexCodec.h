@@ -27,6 +27,8 @@ struct TextureAssetData {
   std::string sourcePath;
   uint64_t sourceHash;
   int64_t sourceTimestamp;
+  int wrapS;
+  int wrapT;
 };
 bool EncodeTextureFile(const TextureAssetData& data, const std::string& path);
 bool DecodeTextureFile(const std::string& path, TextureAssetData& out);

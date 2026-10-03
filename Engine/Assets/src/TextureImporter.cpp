@@ -63,6 +63,8 @@ bool ImportTextureMemory(const void* bytes, size_t size, const std::string& keep
   out.height = static_cast<uint32_t>(h);
   out.format = outFormat;
   out.srgb = srgb;
+  out.wrapS = 10497;
+  out.wrapT = 10497;
   for (size_t i = 0; i < compressed.GetImageCount(); ++i) {
     const DirectX::Image* img = compressed.GetImages() + i;
     TextureMipData mip;
