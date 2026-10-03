@@ -1619,7 +1619,8 @@ bool TestMeshImportNormals() {
   json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1},\"indices\":4,\"material\":0},";
   json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_1\":5},\"indices\":4,\"material\":1},";
   json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":3},\"indices\":4,\"material\":2},";
-  json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_2\":6},\"indices\":4,\"material\":3}";
+  json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_2\":6},\"indices\":4,\"material\":3},";
+  json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1},\"indices\":4,\"material\":0}";
   json += "]}],";
   json += "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}";
   {
@@ -1647,7 +1648,7 @@ bool TestMeshImportNormals() {
     fs::remove_all(dir, ec);
     return false;
   }
-  if (data.parts.size() != 7) {
+  if (data.parts.size() != 8) {
     fs::remove_all(dir, ec);
     return false;
   }
@@ -1657,7 +1658,7 @@ bool TestMeshImportNormals() {
       return false;
     }
   }
-  if (data.parts[4].material != 1 || data.parts[5].material != 2 || data.parts[6].material != 3) {
+  if (data.parts[4].material != 1 || data.parts[5].material != 2 || data.parts[6].material != 3 || data.parts[7].material != 0) {
     fs::remove_all(dir, ec);
     return false;
   }
@@ -1698,6 +1699,16 @@ bool TestMeshImportNormals() {
   for (size_t i = 36; i < 42; ++i) {
     float want = (i % 2 == 0) ? 0.1f : 0.9f;
     if (std::fabs(data.uvs[i] - want) > 1e-5f) {
+      fs::remove_all(dir, ec);
+      return false;
+    }
+  }
+  if (data.uvs.size() < 48) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  for (size_t i = 42; i < 48; ++i) {
+    if (data.uvs[i] != 0.0f) {
       fs::remove_all(dir, ec);
       return false;
     }
