@@ -31,6 +31,8 @@
 #include "Kizuri/Assets/TexCodec.h"
 #include "Kizuri/Assets/TextureImporter.h"
 #include <DirectXMath.h>
+#include <stb_image.h>
+#include <DirectXTex.h>
 #include <filesystem>
 #include <TaskScheduler.h>
 #include <cstdio>
@@ -1412,6 +1414,82 @@ bool TestMeshImport() {
   }
   if (Kizuri::ImportGltfMesh("no_such_file_xyz.glb", "", data, nullptr)) {
     return false;
+  }
+  return true;
+}
+bool TestTexPixels() {
+  int sw = 0;
+  int sh = 0;
+  int sc = 0;
+  stbi_uc* spx = stbi_load("Samples/Assets/brick.bmp", &sw, &sh, &sc, 4);
+  if (spx == nullptr || sw != 16 || sh != 16) {
+    if (spx != nullptr) {
+      stbi_image_free(spx);
+    }
+    return false;
+  }
+  Kizuri::TextureAssetData tdata;
+  if (!Kizuri::ImportTextureFile("Samples/Assets/brick.bmp", "", tdata)) {
+    stbi_image_free(spx);
+    return false;
+  }
+  if (tdata.width != 16 || tdata.height != 16 || tdata.mips.empty()) {
+    stbi_image_free(spx);
+    return false;
+  }
+  if (tdata.format != Kizuri::TexFormat::Bc1 || !tdata.srgb) {
+    stbi_image_free(spx);
+    return false;
+  }
+  const Kizuri::TextureMipData& m0 = tdata.mips[0];
+  DirectX::Image img;
+  img.width = m0.width;
+  img.height = m0.height;
+  img.format = DXGI_FORMAT_BC1_UNORM_SRGB;
+  img.rowPitch = m0.rowPitch;
+  img.slicePitch = m0.data.size();
+  img.pixels = const_cast<uint8_t*>(m0.data.data());
+  DirectX::TexMetadata meta;
+  meta.width = m0.width;
+  meta.height = m0.height;
+  meta.depth = 1;
+  meta.arraySize = 1;
+  meta.mipLevels = 1;
+  meta.miscFlags = 0;
+  meta.miscFlags2 = 0;
+  meta.format = DXGI_FORMAT_BC1_UNORM_SRGB;
+  meta.dimension = DirectX::TEX_DIMENSION_TEXTURE2D;
+  DirectX::ScratchImage dec;
+  bool ok = SUCCEEDED(DirectX::Decompress(&img, 1, meta, DXGI_FORMAT_R8G8B8A8_UNORM, dec));
+  if (!ok || dec.GetPixels() == nullptr) {
+    stbi_image_free(spx);
+    return false;
+  }
+  const uint8_t* dp = dec.GetPixels();
+  int maxAbs = 0;
+  for (int i = 0; i < 16 * 16 * 4; ++i) {
+    int d = static_cast<int>(dp[i]) - static_cast<int>(spx[i]);
+    if (d < 0) {
+      d = -d;
+    }
+    if (d > maxAbs) {
+      maxAbs = d;
+    }
+  }
+  int sx0[4] = { spx[0], spx[1], spx[2], spx[3] };
+  int sx1[4] = { spx[(15 * 16 + 15) * 4 + 0], spx[(15 * 16 + 15) * 4 + 1], spx[(15 * 16 + 15) * 4 + 2], spx[(15 * 16 + 15) * 4 + 3] };
+  int dx0[4] = { dp[0], dp[1], dp[2], dp[3] };
+  int dx1[4] = { dp[(15 * 16 + 15) * 4 + 0], dp[(15 * 16 + 15) * 4 + 1], dp[(15 * 16 + 15) * 4 + 2], dp[(15 * 16 + 15) * 4 + 3] };
+  stbi_image_free(spx);
+  if (maxAbs > 32) {
+    return false;
+  }
+  for (int c = 0; c < 3; ++c) {
+    int ss = sx1[c] - sx0[c];
+    int ds = dx1[c] - dx0[c];
+    if ((ss > 8 && ds < -8) || (ss < -8 && ds > 8)) {
+      return false;
+    }
   }
   return true;
 }
@@ -3234,6 +3312,7 @@ int main() {
   failures += Check("MeshCodec", TestMeshCodec());
   failures += Check("MeshImport", TestMeshImport());
   failures += Check("MeshImportTextured", TestMeshImportTextured());
+  failures += Check("TexPixels", TestTexPixels());
   failures += Check("AssetDatabase", TestAssetDatabase());
   failures += Check("SceneMeshGuid", TestSceneMeshGuid());
   failures += Check("ImportNoRetry", TestImportNoRetry());
