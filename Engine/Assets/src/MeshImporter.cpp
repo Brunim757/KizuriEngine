@@ -110,18 +110,96 @@ bool ReadVec3(const cgltf_accessor* acc, size_t idx, float* v) {
   v[2] = f[2];
   return true;
 }
-bool ReadVec2(const cgltf_accessor* acc, size_t idx, float* v) {
-  if (acc == nullptr || acc->type != cgltf_type_vec2 || acc->component_type != cgltf_component_type_r_32f) {
+bool ReadVec3N(const cgltf_accessor* acc, size_t idx, float* v) {
+  if (acc == nullptr || acc->type != cgltf_type_vec3) {
     return false;
   }
   if (idx >= acc->count || acc->buffer_view == nullptr || acc->buffer_view->buffer == nullptr) {
     return false;
   }
   const unsigned char* base = static_cast<const unsigned char*>(acc->buffer_view->buffer->data);
-  const float* f = reinterpret_cast<const float*>(base + acc->buffer_view->offset + acc->offset + idx * acc->stride);
-  v[0] = f[0];
-  v[1] = f[1];
-  return true;
+  size_t off = acc->buffer_view->offset + acc->offset + idx * acc->stride;
+  if (acc->component_type == cgltf_component_type_r_32f) {
+    const float* f = reinterpret_cast<const float*>(base + off);
+    v[0] = f[0];
+    v[1] = f[1];
+    v[2] = f[2];
+    return true;
+  }
+  if (!acc->normalized) {
+    return false;
+  }
+  if (acc->component_type == cgltf_component_type_r_8) {
+    const int8_t* b = reinterpret_cast<const int8_t*>(base + off);
+    v[0] = static_cast<float>(b[0]) / 127.0f;
+    v[1] = static_cast<float>(b[1]) / 127.0f;
+    v[2] = static_cast<float>(b[2]) / 127.0f;
+    return true;
+  }
+  if (acc->component_type == cgltf_component_type_r_8u) {
+    v[0] = static_cast<float>(base[off]) / 255.0f;
+    v[1] = static_cast<float>(base[off + 1]) / 255.0f;
+    v[2] = static_cast<float>(base[off + 2]) / 255.0f;
+    return true;
+  }
+  if (acc->component_type == cgltf_component_type_r_16u) {
+    const uint16_t* w = reinterpret_cast<const uint16_t*>(base + off);
+    v[0] = static_cast<float>(w[0]) / 65535.0f;
+    v[1] = static_cast<float>(w[1]) / 65535.0f;
+    v[2] = static_cast<float>(w[2]) / 65535.0f;
+    return true;
+  }
+  if (acc->component_type == cgltf_component_type_r_16) {
+    const int16_t* w = reinterpret_cast<const int16_t*>(base + off);
+    v[0] = static_cast<float>(w[0]) / 32767.0f;
+    v[1] = static_cast<float>(w[1]) / 32767.0f;
+    v[2] = static_cast<float>(w[2]) / 32767.0f;
+    return true;
+  }
+  return false;
+}
+bool ReadVec2(const cgltf_accessor* acc, size_t idx, float* v) {
+  if (acc == nullptr || acc->type != cgltf_type_vec2) {
+    return false;
+  }
+  if (idx >= acc->count || acc->buffer_view == nullptr || acc->buffer_view->buffer == nullptr) {
+    return false;
+  }
+  const unsigned char* base = static_cast<const unsigned char*>(acc->buffer_view->buffer->data);
+  size_t off = acc->buffer_view->offset + acc->offset + idx * acc->stride;
+  if (acc->component_type == cgltf_component_type_r_32f) {
+    const float* f = reinterpret_cast<const float*>(base + off);
+    v[0] = f[0];
+    v[1] = f[1];
+    return true;
+  }
+  if (!acc->normalized) {
+    return false;
+  }
+  if (acc->component_type == cgltf_component_type_r_8) {
+    const int8_t* b = reinterpret_cast<const int8_t*>(base + off);
+    v[0] = static_cast<float>(b[0]) / 127.0f;
+    v[1] = static_cast<float>(b[1]) / 127.0f;
+    return true;
+  }
+  if (acc->component_type == cgltf_component_type_r_8u) {
+    v[0] = static_cast<float>(base[off]) / 255.0f;
+    v[1] = static_cast<float>(base[off + 1]) / 255.0f;
+    return true;
+  }
+  if (acc->component_type == cgltf_component_type_r_16u) {
+    const uint16_t* w = reinterpret_cast<const uint16_t*>(base + off);
+    v[0] = static_cast<float>(w[0]) / 65535.0f;
+    v[1] = static_cast<float>(w[1]) / 65535.0f;
+    return true;
+  }
+  if (acc->component_type == cgltf_component_type_r_16) {
+    const int16_t* w = reinterpret_cast<const int16_t*>(base + off);
+    v[0] = static_cast<float>(w[0]) / 32767.0f;
+    v[1] = static_cast<float>(w[1]) / 32767.0f;
+    return true;
+  }
+  return false;
 }
 bool ReadIndex(const cgltf_accessor* acc, size_t idx, uint32_t& v) {
   if (acc == nullptr || acc->type != cgltf_type_scalar || acc->buffer_view == nullptr || acc->buffer_view->buffer == nullptr) {
@@ -201,7 +279,7 @@ bool ImportGltfMesh(const std::string& glbPath, const std::string& keepGuid, Mes
             ok = false;
             break;
           }
-          if (nrmAcc != nullptr && !ReadVec3(nrmAcc, vi, n)) {
+          if (nrmAcc != nullptr && !ReadVec3N(nrmAcc, vi, n)) {
             ok = false;
             break;
           }
@@ -231,6 +309,7 @@ bool ImportGltfMesh(const std::string& glbPath, const std::string& keepGuid, Mes
               found = true;
               break;
             }
+          }
           }
           if (!found) {
             MeshMaterialData md;
@@ -287,6 +366,20 @@ bool ImportGltfMesh(const std::string& glbPath, const std::string& keepGuid, Mes
         MeshPartData part;
         part.indexOffset = static_cast<uint32_t>(out.indices.size());
         part.material = matIndex;
+        if (log != nullptr) {
+          if (prim.material == nullptr) {
+            log->Add(LogLevel::Warning, std::string("Prim ") + std::to_string(pi) + " has no material; flat fallback");
+          } else {
+            const MeshMaterialData& wmd = out.materials[matIndex < out.materials.size() ? matIndex : out.materials.size() - 1];
+            bool wantsTex = prim.material->has_pbr_metallic_roughness && prim.material->pbr_metallic_roughness.base_color_texture.texture != nullptr && prim.material->pbr_metallic_roughness.base_color_texture.texture->image != nullptr;
+            if (wantsTex && wmd.albedoTexGuid.empty()) {
+              log->Add(LogLevel::Warning, std::string("Prim ") + std::to_string(pi) + " texture image could not be resolved");
+            }
+            if (!wmd.albedoTexGuid.empty() && uvAcc == nullptr) {
+              log->Add(LogLevel::Warning, std::string("Prim ") + std::to_string(pi) + " has texture but no TEXCOORD_0; single texel");
+            }
+          }
+        }
         if (prim.indices != nullptr) {
           for (size_t ii = 0; ii < prim.indices->count; ++ii) {
             uint32_t idx = 0;

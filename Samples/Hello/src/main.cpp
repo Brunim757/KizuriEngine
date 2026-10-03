@@ -1553,6 +1553,116 @@ bool TestTexPixels() {
   }
   return true;
 }
+bool TestMeshImportNormals() {
+  namespace fs = std::filesystem;
+  fs::path dir = fs::temp_directory_path() / "kznormuv_test";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  fs::copy_file("Samples/Assets/brick.bmp", dir / "brick.bmp", ec);
+  if (ec) {
+    return false;
+  }
+  std::vector<unsigned char> bin;
+  float pos[9] = { 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
+  float nrm[9] = { 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f };
+  unsigned char uvb[6] = { 0, 0, 255, 0, 0, 255 };
+  float uvf[6] = { 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f };
+  uint16_t idx[3] = { 0, 1, 2 };
+  bin.insert(bin.end(), reinterpret_cast<unsigned char*>(pos), reinterpret_cast<unsigned char*>(pos) + 36);
+  bin.insert(bin.end(), reinterpret_cast<unsigned char*>(nrm), reinterpret_cast<unsigned char*>(nrm) + 36);
+  bin.insert(bin.end(), uvb, uvb + 6);
+  bin.insert(bin.end(), reinterpret_cast<unsigned char*>(uvf), reinterpret_cast<unsigned char*>(uvf) + 24);
+  bin.insert(bin.end(), reinterpret_cast<unsigned char*>(idx), reinterpret_cast<unsigned char*>(idx) + 6);
+  {
+    FILE* fp = std::fopen((dir / "model.bin").string().c_str(), "wb");
+    if (fp == nullptr) {
+      fs::remove_all(dir, ec);
+      return false;
+    }
+    std::fwrite(bin.data(), 1, bin.size(), fp);
+    std::fclose(fp);
+  }
+  std::string json = "{";
+  json += "\"asset\":{\"version\":\"2.0\"},";
+  json += "\"buffers\":[{\"byteLength\":" + std::to_string(bin.size()) + ",\"uri\":\"model.bin\"}],";
+  json += "\"bufferViews\":[";
+  json += "{\"buffer\":0,\"byteOffset\":0,\"byteLength\":36},";
+  json += "{\"buffer\":0,\"byteOffset\":36,\"byteLength\":36},";
+  json += "{\"buffer\":0,\"byteOffset\":72,\"byteLength\":6},";
+  json += "{\"buffer\":0,\"byteOffset\":78,\"byteLength\":24},";
+  json += "{\"buffer\":0,\"byteOffset\":102,\"byteLength\":6}],";
+  json += "\"accessors\":[";
+  json += "{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"},";
+  json += "{\"bufferView\":1,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"},";
+  json += "{\"bufferView\":2,\"componentType\":5121,\"normalized\":true,\"count\":3,\"type\":\"VEC2\"},";
+  json += "{\"bufferView\":3,\"componentType\":5126,\"count\":3,\"type\":\"VEC2\"},";
+  json += "{\"bufferView\":4,\"componentType\":5123,\"count\":3,\"type\":\"SCALAR\"}],";
+  json += "\"images\":[{\"uri\":\"brick.bmp\"}],";
+  json += "\"textures\":[{\"source\":0}],";
+  json += "\"materials\":[{\"name\":\"Shared\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[1,1,1,1],\"baseColorTexture\":{\"index\":0}}}],";
+  json += "\"meshes\":[{\"primitives\":[";
+  json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":2},\"indices\":4,\"material\":0},";
+  json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":3},\"indices\":4,\"material\":0},";
+  json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":3},\"indices\":4},";
+  json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1},\"indices\":4,\"material\":0}";
+  json += "]}],";
+  json += "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}";
+  {
+    FILE* fp = std::fopen((dir / "model.gltf").string().c_str(), "wb");
+    if (fp == nullptr) {
+      fs::remove_all(dir, ec);
+      return false;
+    }
+    std::fwrite(json.data(), 1, json.size(), fp);
+    std::fclose(fp);
+  }
+  Kizuri::MeshAssetData data;
+  Kizuri::LogStore log;
+  if (!Kizuri::ImportGltfMesh((dir / "model.gltf").string(), "", data, &log)) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (data.materials.size() != 1 || data.materials[0].albedoTexGuid.empty()) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (data.parts.size() != 4) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  for (size_t i = 0; i < 4; ++i) {
+    if (data.parts[i].material != 0) {
+      fs::remove_all(dir, ec);
+      return false;
+    }
+  }
+  if (data.uvs.size() < 24) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (data.uvs[0] != 0.0f || data.uvs[1] != 0.0f || data.uvs[2] != 1.0f || data.uvs[3] != 0.0f || data.uvs[4] != 0.0f || data.uvs[5] != 1.0f) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (data.uvs[6] != 0.0f || data.uvs[8] != 1.0f || data.uvs[11] != 1.0f) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  bool sawNoMat = false;
+  bool sawNoUV = false;
+  for (size_t i = 0; i < log.Count(); ++i) {
+    const std::string& t = log.At(i).text;
+    if (t.find("no material") != std::string::npos) {
+      sawNoMat = true;
+    }
+    if (t.find("TEXCOORD_0") != std::string::npos) {
+      sawNoUV = true;
+    }
+  }
+  fs::remove_all(dir, ec);
+  return sawNoMat && sawNoUV;
+}
 bool TestMeshImportTextured() {
   namespace fs = std::filesystem;
   fs::path dir = fs::temp_directory_path() / "kztexmesh_test";
@@ -3372,6 +3482,7 @@ int main() {
   failures += Check("MeshCodec", TestMeshCodec());
   failures += Check("MeshImport", TestMeshImport());
   failures += Check("MeshImportTextured", TestMeshImportTextured());
+  failures += Check("MeshImportNormals", TestMeshImportNormals());
   failures += Check("TexPixels", TestTexPixels());
   failures += Check("AssetDatabase", TestAssetDatabase());
   failures += Check("SceneMeshGuid", TestSceneMeshGuid());
