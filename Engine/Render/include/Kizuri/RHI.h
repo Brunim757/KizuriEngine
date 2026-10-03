@@ -30,7 +30,9 @@ enum class RHITextureFormat {
   BC1_UNORM_SRGB,
   BC3_UNORM,
   BC3_UNORM_SRGB,
-  BC5_UNORM
+  BC5_UNORM,
+  BC7_UNORM,
+  BC7_UNORM_SRGB
 };
 using RHIBuffer = uint64_t;
 using RHIConstBuffer = uint64_t;

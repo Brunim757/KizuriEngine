@@ -40,6 +40,12 @@ DXGI_FORMAT ToTextureFormat(RHITextureFormat f) {
   if (f == RHITextureFormat::BC5_UNORM) {
     return DXGI_FORMAT_BC5_UNORM;
   }
+  if (f == RHITextureFormat::BC7_UNORM) {
+    return DXGI_FORMAT_BC7_UNORM;
+  }
+  if (f == RHITextureFormat::BC7_UNORM_SRGB) {
+    return DXGI_FORMAT_BC7_UNORM_SRGB;
+  }
   return DXGI_FORMAT_R8G8B8A8_UNORM;
 }
 bool CheckTextureMipParams(int tw, int th, int tmips, RHITextureFormat tfmt, int mip, int mw, int mh, uint32_t rowPitch, size_t bytes) {

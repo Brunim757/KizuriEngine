@@ -17,6 +17,9 @@ RHITextureFormat ToRHIFormat(TexFormat fmt, bool srgb) {
   if (fmt == TexFormat::Bc1) {
     return srgb ? RHITextureFormat::BC1_UNORM_SRGB : RHITextureFormat::BC1_UNORM;
   }
+  if (fmt == TexFormat::Bc7) {
+    return srgb ? RHITextureFormat::BC7_UNORM_SRGB : RHITextureFormat::BC7_UNORM;
+  }
   if (fmt == TexFormat::Bc3) {
     return srgb ? RHITextureFormat::BC3_UNORM_SRGB : RHITextureFormat::BC3_UNORM;
   }

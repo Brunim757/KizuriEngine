@@ -30,13 +30,6 @@ bool ImportTextureMemory(const void* bytes, size_t size, const std::string& keep
     return false;
   }
   bool normal = asNormal || NameHintsNormal(nameHint);
-  bool hasAlpha = false;
-  for (int i = 0; i < w * h; ++i) {
-    if (pixels[i * 4 + 3] < 255) {
-      hasAlpha = true;
-      break;
-    }
-  }
   bool srgb = !normal;
   DirectX::ScratchImage src;
   if (FAILED(src.Initialize2D(DXGI_FORMAT_R8G8B8A8_UNORM, w, h, 1, 1))) {
@@ -53,17 +46,13 @@ bool ImportTextureMemory(const void* bytes, size_t size, const std::string& keep
   if (FAILED(DirectX::GenerateMipMaps(src.GetImages(), src.GetImageCount(), src.GetMetadata(), filter, 0, mipChain))) {
     return false;
   }
-  DXGI_FORMAT destFormat = DXGI_FORMAT_BC1_UNORM;
-  TexFormat outFormat = TexFormat::Bc1;
+  DXGI_FORMAT destFormat = DXGI_FORMAT_BC7_UNORM;
+  TexFormat outFormat = TexFormat::Bc7;
   if (normal) {
     destFormat = DXGI_FORMAT_BC5_UNORM;
     outFormat = TexFormat::Bc5;
-  } else if (hasAlpha) {
-    destFormat = srgb ? DXGI_FORMAT_BC3_UNORM_SRGB : DXGI_FORMAT_BC3_UNORM;
-    outFormat = TexFormat::Bc3;
-  } else {
-    destFormat = srgb ? DXGI_FORMAT_BC1_UNORM_SRGB : DXGI_FORMAT_BC1_UNORM;
-    outFormat = TexFormat::Bc1;
+  } else if (srgb) {
+    destFormat = DXGI_FORMAT_BC7_UNORM_SRGB;
   }
   DirectX::ScratchImage compressed;
   if (FAILED(DirectX::Compress(mipChain.GetImages(), mipChain.GetImageCount(), mipChain.GetMetadata(), destFormat, DirectX::TEX_COMPRESS_DEFAULT, DirectX::TEX_THRESHOLD_DEFAULT, compressed))) {

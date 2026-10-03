@@ -7,7 +7,8 @@ enum class TexFormat : uint32_t {
   Rgba8 = 0,
   Bc1 = 1,
   Bc3 = 2,
-  Bc5 = 3
+  Bc5 = 3,
+  Bc7 = 4
 };
 struct TextureMipData {
   uint32_t width;

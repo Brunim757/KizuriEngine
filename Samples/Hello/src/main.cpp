@@ -1439,7 +1439,7 @@ bool TestTexPixels() {
     stbi_image_free(spx);
     return false;
   }
-  if (tdata.format != Kizuri::TexFormat::Bc1 || !tdata.srgb) {
+  if (tdata.format != Kizuri::TexFormat::Bc7 || !tdata.srgb) {
     stbi_image_free(spx);
     return false;
   }
@@ -1447,7 +1447,7 @@ bool TestTexPixels() {
   DirectX::Image img;
   img.width = m0.width;
   img.height = m0.height;
-  img.format = DXGI_FORMAT_BC1_UNORM_SRGB;
+  img.format = DXGI_FORMAT_BC7_UNORM_SRGB;
   img.rowPitch = m0.rowPitch;
   img.slicePitch = m0.data.size();
   img.pixels = const_cast<uint8_t*>(m0.data.data());
@@ -1459,7 +1459,7 @@ bool TestTexPixels() {
   meta.mipLevels = 1;
   meta.miscFlags = 0;
   meta.miscFlags2 = 0;
-  meta.format = DXGI_FORMAT_BC1_UNORM_SRGB;
+  meta.format = DXGI_FORMAT_BC7_UNORM_SRGB;
   meta.dimension = DirectX::TEX_DIMENSION_TEXTURE2D;
   DirectX::ScratchImage dec;
   bool ok = SUCCEEDED(DirectX::Decompress(&img, 1, meta, DXGI_FORMAT_R8G8B8A8_UNORM, dec));
@@ -1538,6 +1538,9 @@ bool TestTexPixels() {
   std::printf("texpixels: maxAbs=%d tl=%d,%d,%d br=%d,%d,%d\n", maxAbs, dx0[0], dx0[1], dx0[2], dx1[0], dx1[1], dx1[2]);
   std::printf("texpixels: at=(%d,%d) ch=%d src=%d dec=%d\n", maxX, maxY, maxC, maxS, maxD);
   std::printf("texpixels: rms=%.2f over10=%d\n", rms, over10);
+  if (rms > 6.0 || over10 > 96) {
+    return false;
+  }
   if (maxAbs > 32) {
     return false;
   }
@@ -1985,7 +1988,7 @@ bool TestTexImportOpaque() {
     fs::remove_all(dir, ec);
     return false;
   }
-  if (to.format != Kizuri::TexFormat::Bc1 || !to.srgb || to.mips.size() < 3) {
+  if (to.format != Kizuri::TexFormat::Bc7 || !to.srgb || to.mips.size() < 3) {
     fs::remove_all(dir, ec);
     return false;
   }
@@ -2068,7 +2071,7 @@ bool TestTexImport() {
     return false;
   }
   bool ok = true;
-  if (to.format != Kizuri::TexFormat::Bc1 || !to.srgb || to.mips.size() < 3) {
+  if (to.format != Kizuri::TexFormat::Bc7 || !to.srgb || to.mips.size() < 3) {
     fs::remove_all(dir, ec);
     return false;
   }
@@ -3019,7 +3022,7 @@ bool TestDbTextures() {
     fs::remove_all(dir, ec);
     return false;
   }
-  if (tr->data.width != 16 || tr->data.mips.size() < 2 || tr->data.format != Kizuri::TexFormat::Bc1) {
+  if (tr->data.width != 16 || tr->data.mips.size() < 2 || tr->data.format != Kizuri::TexFormat::Bc7) {
     fs::remove_all(dir, ec);
     return false;
   }
