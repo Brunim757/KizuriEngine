@@ -74,6 +74,7 @@ void EditorApp::RenderScene() {
   renderer.SetGrade(viewExposure, viewACES);
   renderer.SetBloom(viewBloom);
   renderer.SetSsao(viewSsao, viewSsaoIntensity, viewSsaoRadius);
+  renderer.SetFog(viewFog, viewFogDensity, viewFogColor);
   std::vector<EntityId> lightIds = scene.All();
   for (size_t i = 0; i < lightIds.size(); ++i) {
     const Entity* e = scene.Get(lightIds[i]);
@@ -286,6 +287,14 @@ void EditorApp::DrawViewport() {
   ImGui::SameLine();
   ImGui::SetNextItemWidth(110.0f);
   ImGui::SliderFloat("SsaoRad", &viewSsaoRadius, 0.1f, 2.0f);
+  ImGui::SameLine();
+  ImGui::Checkbox("Fog", &viewFog);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(110.0f);
+  ImGui::SliderFloat("FogDen", &viewFogDensity, 0.0f, 0.05f);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(110.0f);
+  ImGui::ColorEdit3("FogCol", viewFogColor);
   if (ImGui::IsWindowHovered() && !ImGui::GetIO().WantTextInput && !RawInputPoll::IsMouseDown(VK_RBUTTON)) {
     if (ImGui::IsKeyPressed(ImGuiKey_W, false)) {
       gizmoOp = static_cast<int>(ImGuizmo::TRANSLATE);

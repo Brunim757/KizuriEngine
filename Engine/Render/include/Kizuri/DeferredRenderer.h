@@ -79,6 +79,7 @@ public:
   void SetBloom(float strength);
   void SetFsr(float scale, float sharpness);
   void SetSsao(bool on, float intensity, float radius);
+  void SetFog(bool on, float density, const float color[3]);
   bool Resize(int w, int h);
   void SetViewOffset(float x, float y);
   void Render(const float view[16], const float proj[16], const float camPos[3]);
@@ -168,6 +169,9 @@ private:
   float ssaoIntensity;
   float ssaoRadius;
   bool ssaoValid;
+  bool fogOn;
+  float fogDensity;
+  float fogColor[3];
   RHIInputLayout layout;
   RHISampler sampler;
   uint32_t indexCount;

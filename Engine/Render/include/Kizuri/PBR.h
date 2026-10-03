@@ -48,4 +48,5 @@ float SsaoTapOcclusion(
   const float camPos[3],
   float radius,
   float bias);
+float FogTransmittance(float density, float dist);
 }

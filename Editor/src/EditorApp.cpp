@@ -34,6 +34,8 @@ EditorApp::EditorApp()
   , viewSsao(true)
   , viewSsaoIntensity(1.0f)
   , viewSsaoRadius(0.5f)
+  , viewFog(true)
+  , viewFogDensity(0.004f)
   , viewX(0.0f)
   , viewY(0.0f)
   , viewW(1280.0f)
@@ -60,6 +62,10 @@ EditorApp::EditorApp()
   , afterSaveRunPending(false)
   , savePromptQueued(false)
   , restorePromptQueued(false) {
+  viewFogColor[0] = 0.6f;
+  viewFogColor[1] = 0.7f;
+  viewFogColor[2] = 0.8f;
+}
   renameBuf[0] = '\0';
   showNotifHistory = false;
   assetRenameBuf[0] = '\0';

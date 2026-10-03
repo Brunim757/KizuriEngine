@@ -284,4 +284,10 @@ float SsaoTapOcclusion(
   }
   return 1.0f - dist / r;
 }
+float FogTransmittance(float density, float dist) {
+  if (density <= 0.0f || dist <= 0.0f) {
+    return 1.0f;
+  }
+  return std::exp(-density * dist);
+}
 }

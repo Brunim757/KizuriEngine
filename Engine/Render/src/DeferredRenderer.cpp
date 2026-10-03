@@ -43,6 +43,8 @@ struct LightConstants {
   float skyColor[4];
   float ssaoInfo[4];
   float ssaoVP[16];
+  float fogInfo[4];
+  float fogColor[4];
 };
 struct MatConstants {
   float albedo[4];
@@ -114,6 +116,8 @@ DeferredRenderer::DeferredRenderer()
   , ssaoIntensity(1.0f)
   , ssaoRadius(0.5f)
   , ssaoValid(false)
+  , fogOn(true)
+  , fogDensity(0.004f)
   , layout(0)
   , sampler(0)
   , indexCount(0)
@@ -123,6 +127,9 @@ DeferredRenderer::DeferredRenderer()
   , ready(false) {
   material.albedo[0] = 0.8f;
   material.albedo[1] = 0.2f;
+  fogColor[0] = 0.6f;
+  fogColor[1] = 0.7f;
+  fogColor[2] = 0.8f;
   material.albedo[2] = 0.15f;
   material.roughness = 0.5f;
   material.metallic = 0.0f;
@@ -394,8 +401,7 @@ void DeferredRenderer::SetBloom(float strength) {
     bloomStrength = 2.0f;
   }
 }
-void DeferredRenderer::SetSsao(bool on, float intensity, float radius) {
-  ssaoOn = on;
+void DeferredRenderer::SetSsao(bool on, float intensity, float radius) {  ssaoOn = on;
   ssaoIntensity = intensity;
   if (ssaoIntensity < 0.0f) {
     ssaoIntensity = 0.0f;
@@ -409,6 +415,21 @@ void DeferredRenderer::SetSsao(bool on, float intensity, float radius) {
   }
   if (ssaoRadius > 2.0f) {
     ssaoRadius = 2.0f;
+  }
+}
+void DeferredRenderer::SetFog(bool on, float density, const float color[3]) {
+  fogOn = on;
+  fogDensity = density;
+  if (fogDensity < 0.0f) {
+    fogDensity = 0.0f;
+  }
+  if (fogDensity > 0.05f) {
+    fogDensity = 0.05f;
+  }
+  if (color != nullptr) {
+    fogColor[0] = color[0];
+    fogColor[1] = color[1];
+    fogColor[2] = color[2];
   }
 }
 void DeferredRenderer::RenderShadowMaps() {
@@ -1168,6 +1189,14 @@ void DeferredRenderer::EndInternal(const float camPos[3], bool toTexture) {
   lc.ssaoInfo[2] = 0.0f;
   lc.ssaoInfo[3] = 0.0f;
   std::memcpy(lc.ssaoVP, ssaoVP, sizeof(lc.ssaoVP));
+  lc.fogInfo[0] = fogOn ? 1.0f : 0.0f;
+  lc.fogInfo[1] = fogDensity;
+  lc.fogInfo[2] = 0.0f;
+  lc.fogInfo[3] = 0.0f;
+  lc.fogColor[0] = fogColor[0];
+  lc.fogColor[1] = fogColor[1];
+  lc.fogColor[2] = fogColor[2];
+  lc.fogColor[3] = 0.0f;
   rhi->UpdateConstantBuffer(lightCB, &lc, sizeof(lc));
   rhi->SetPixelConstantBuffer(0, lightCB);
   if (shadowMapsValid) {

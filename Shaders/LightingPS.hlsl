@@ -34,6 +34,8 @@ cbuffer LightCB : register(b0)
     float4 SkyColor;
     float4 SsaoInfo;
     row_major float4x4 SsaoVP;
+    float4 FogInfo;
+    float4 FogColor;
 };
 Texture2D SSAOTX : register(t6);
 Texture2D ShadowAtlas : register(t4);
@@ -163,6 +165,63 @@ float SampleTilePCSS(float3 wpos, row_major float4x4 vp, float tile, float tileK
     }
     return PCSSFilter2D(uv, sp.z, filterUV);
 }
+float CascadeShadowSingle(float3 wpos)
+{
+    float firstLight = 1e9;
+    for (int q = 0; q < 4; ++q) {
+        if (CascadeLight[q] >= 0.0 && CascadeLight[q] < firstLight) {
+            firstLight = CascadeLight[q];
+        }
+    }
+    if (firstLight > 1e8) {
+        return 1.0;
+    }
+    float vd = dot(wpos - CamPos.xyz, CamFwd.xyz);
+    for (int c = 0; c < 4; ++c) {
+        if (CascadeLight[c] == firstLight && vd <= CascadeSplit[c]) {
+            float4 sp = mul(float4(wpos, 1.0), CascadeVP[c]);
+            if (sp.w <= 0.0) {
+                return 1.0;
+            }
+            sp.xyz /= sp.w;
+            if (abs(sp.x) > 1.0 || abs(sp.y) > 1.0 || sp.z < 0.0 || sp.z > 1.0) {
+                return 1.0;
+            }
+            float tx = fmod((float)c, 2.0);
+            float ty = floor((float)c / 2.0);
+            float k = clamp(CascadeK[c], 0.05, 1.0);
+            float u = (sp.x * 0.5 + 0.5) * 0.5 * k + tx * 0.5;
+            float v = (0.5 - sp.y * 0.5) * 0.5 * k + ty * 0.5;
+            float d = ShadowAtlas.SampleLevel(ShadowSampler, float2(u, v), 0).r;
+            return (sp.z - 0.0025 < d) ? 1.0 : 0.0;
+        }
+    }
+    return 1.0;
+}
+float3 ApplyFog(float3 col, float3 rayDir, float tMax, float2 suv)
+{
+    float dens = FogInfo.y;
+    float stepLen = tMax / 8.0;
+    float h = frac(sin(dot(suv, float2(12.9898, 78.233))) * 43758.5453);
+    float3 toSun = normalize(SkySun.xyz);
+    float3 sunCol = SkyColor.rgb * max(SkySun.w, 0.0);
+    float cosT = max(dot(rayDir, toSun), 0.0);
+    float ph = 0.5 + 0.5 * pow(cosT, 4.0);
+    float trans = 1.0;
+    float3 insc = float3(0.0, 0.0, 0.0);
+    for (int s = 0; s < 8; ++s) {
+        float tt = min(h * stepLen + ((float)s + 0.5) * stepLen, tMax);
+        float3 p = CamPos.xyz + rayDir * tt;
+        float sh = 1.0;
+        if (ShadowInfo.y > 0.5) {
+            sh = CascadeShadowSingle(p);
+        }
+        float3 S = (sunCol * ph * sh + FogColor.rgb * 0.15) * dens;
+        insc += trans * S * stepLen;
+        trans *= exp(-dens * stepLen);
+    }
+    return col * trans + insc;
+}
 float LinearizeCube(float ndcZ, float nearZ, float farZ)
 {
     float denom = 1.0 - ndcZ * (farZ - nearZ) / max(farZ, 1e-4);
@@ -264,6 +323,9 @@ float4 main(PSIn pin) : SV_Target
         ray = normalize(ray);
         float sint = max(SkySun.w, 1e-3);
         float3 sk = SkyGradient(ray, normalize(SkySun.xyz), SkyColor.rgb, sint);
+        if (FogInfo.x > 0.5) {
+            sk = ApplyFog(sk, ray, 300.0, pin.uv);
+        }
         float3 se = sk * GradeInfo.x;
         float3 st = se;
         if (GradeInfo.y > 0.5) {
@@ -371,6 +433,15 @@ float4 main(PSIn pin) : SV_Target
     }
     col *= ao;
     float3 amb = albedo * 0.03 * ao;
+    if (FogInfo.x > 0.5) {
+        float3 toFrag = wpos - CamPos.xyz;
+        float fragDist = length(toFrag);
+        if (fragDist > 1e-3) {
+            float3 fogged = ApplyFog(col + amb, toFrag / fragDist, fragDist, pin.uv);
+            col = fogged;
+            amb = float3(0.0, 0.0, 0.0);
+        }
+    }
     float3 hdr = col + amb;
     float3 expo = hdr * GradeInfo.x;
     float3 outc = expo;

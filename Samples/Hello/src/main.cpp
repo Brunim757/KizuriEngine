@@ -2679,6 +2679,23 @@ bool TestSky() {
   }
   return true;
 }
+bool TestFog() {
+  if (Kizuri::FogTransmittance(0.0f, 100.0f) != 1.0f) {
+    return false;
+  }
+  if (Kizuri::FogTransmittance(0.01f, 0.0f) != 1.0f) {
+    return false;
+  }
+  float t = Kizuri::FogTransmittance(0.01f, 100.0f);
+  if (std::fabs(t - 0.36787944f) > 1e-4f) {
+    return false;
+  }
+  float near = Kizuri::FogTransmittance(0.01f, 10.0f);
+  if (!(near > t && near < 1.0f)) {
+    return false;
+  }
+  return true;
+}
 bool TestSSAO() {
   float cam[3] = { 0.0f, 1.5f, -6.0f };
   float p[3] = { 0.0f, 1.5f, 0.0f };
@@ -3209,6 +3226,7 @@ int main() {
   failures += Check("ACES", TestACES());
   failures += Check("Sky", TestSky());
   failures += Check("SSAO", TestSSAO());
+  failures += Check("Fog", TestFog());
   failures += Check("DbTextures", TestDbTextures());
   if (failures == 0) {
     std::printf("KizuriHello: all bootstrap libs linked and functional\n");
