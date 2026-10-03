@@ -1511,6 +1511,29 @@ bool TestTexPixels() {
     }
   }
   double rms = std::sqrt(static_cast<double>(sumSq) / (16.0 * 16.0 * 3.0));
+  const char* ramp = " .:-=+*#%@";
+  std::printf("texpixels: src:\n");
+  for (int y = 0; y < 16; ++y) {
+    char row[17];
+    for (int x = 0; x < 16; ++x) {
+      int i = (y * 16 + x) * 4;
+      int lum = (static_cast<int>(spx[i]) + static_cast<int>(spx[i]) + static_cast<int>(spx[i + 1]) + static_cast<int>(spx[i + 2])) / 4;
+      row[x] = ramp[lum * 10 / 256];
+    }
+    row[16] = '\0';
+    std::printf("texpixels: |%s|\n", row);
+  }
+  std::printf("texpixels: dec:\n");
+  for (int y = 0; y < 16; ++y) {
+    char row[17];
+    for (int x = 0; x < 16; ++x) {
+      int i = (y * 16 + x) * 4;
+      int lum = (static_cast<int>(dp[i]) + static_cast<int>(dp[i]) + static_cast<int>(dp[i + 1]) + static_cast<int>(dp[i + 2])) / 4;
+      row[x] = ramp[lum * 10 / 256];
+    }
+    row[16] = '\0';
+    std::printf("texpixels: |%s|\n", row);
+  }
   stbi_image_free(spx);
   std::printf("texpixels: maxAbs=%d tl=%d,%d,%d br=%d,%d,%d\n", maxAbs, dx0[0], dx0[1], dx0[2], dx1[0], dx1[1], dx1[2]);
   std::printf("texpixels: at=(%d,%d) ch=%d src=%d dec=%d\n", maxX, maxY, maxC, maxS, maxD);
