@@ -287,6 +287,7 @@ bool ImportGltfMesh(const std::string& glbPath, const std::string& keepGuid, Mes
           uvSet = 0;
           uvSel = uvAcc;
         }
+        bool uvUsable = (uvSel != nullptr);
         if (posAcc == nullptr || posAcc->count == 0) {
           continue;
         }
@@ -429,8 +430,8 @@ bool ImportGltfMesh(const std::string& glbPath, const std::string& keepGuid, Mes
             if (wantsTex && wmd.albedoTexGuid.empty()) {
               log->Add(LogLevel::Warning, std::string("Prim ") + std::to_string(pi) + " texture image could not be resolved");
             }
-            if (!wmd.albedoTexGuid.empty() && uvAcc == nullptr && uvAcc1 == nullptr) {
-              log->Add(LogLevel::Warning, std::string("Prim ") + std::to_string(pi) + " has texture but no TEXCOORD; single texel");
+            if (!wmd.albedoTexGuid.empty() && !uvUsable) {
+              log->Add(LogLevel::Warning, std::string("Prim ") + std::to_string(pi) + " has texture but no usable TEXCOORD; single texel");
             }
           }
         }

@@ -1606,6 +1606,7 @@ bool TestMeshImportNormals() {
   json += "\"images\":[{\"uri\":\"brick.bmp\"}],";
   json += "\"textures\":[{\"source\":0}],";
   json += "\"materials\":[{\"name\":\"Shared\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[1,1,1,1],\"baseColorTexture\":{\"index\":0}}},";
+  json += "{\"name\":\"U1\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[1,1,1,1],\"baseColorTexture\":{\"index\":0,\"texCoord\":1}}},";
   json += "{\"name\":\"Scaled\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[1,1,1,1],\"baseColorTexture\":{\"index\":0,\"extensions\":{\"KHR_texture_transform\":{\"offset\":[0.5,0.0],\"rotation\":0.0,\"scale\":[2.0,2.0]}}}}}],";
   json += "\"extensionsUsed\":[\"KHR_texture_transform\"],";
   json += "\"meshes\":[{\"primitives\":[";
@@ -1613,8 +1614,8 @@ bool TestMeshImportNormals() {
   json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":3},\"indices\":4,\"material\":0},";
   json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":3},\"indices\":4},";
   json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1},\"indices\":4,\"material\":0},";
-  json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_1\":5},\"indices\":4,\"material\":0},";
-  json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":3},\"indices\":4,\"material\":1}";
+  json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_1\":5},\"indices\":4,\"material\":1},";
+  json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":3},\"indices\":4,\"material\":2}";
   json += "]}],";
   json += "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}";
   {
@@ -1634,14 +1635,11 @@ bool TestMeshImportNormals() {
     return false;
   }
   std::printf("normuv: mats=%llu parts=%llu uvs=%llu warns=%llu\n", (unsigned long long)data.materials.size(), (unsigned long long)data.parts.size(), (unsigned long long)data.uvs.size(), (unsigned long long)log.Count());
-  for (size_t i = 0; i < data.uvs.size() && i < 12; ++i) {
-    std::printf("normuv: uv[%llu]=%.4f\n", (unsigned long long)i, data.uvs[i]);
-  }
-  if (data.materials.size() != 2 || data.materials[0].albedoTexGuid.empty()) {
+  if (data.materials.size() != 3 || data.materials[0].albedoTexGuid.empty()) {
     fs::remove_all(dir, ec);
     return false;
   }
-  if (data.materials[0].texCoord != 0 || data.materials[1].texCoord != 0) {
+  if (data.materials[0].texCoord != 0 || data.materials[1].texCoord != 1 || data.materials[2].texCoord != 0) {
     fs::remove_all(dir, ec);
     return false;
   }
@@ -1649,13 +1647,13 @@ bool TestMeshImportNormals() {
     fs::remove_all(dir, ec);
     return false;
   }
-  for (size_t i = 0; i < 5; ++i) {
+  for (size_t i = 0; i < 4; ++i) {
     if (data.parts[i].material != 0) {
       fs::remove_all(dir, ec);
       return false;
     }
   }
-  if (data.parts[5].material != 1) {
+  if (data.parts[4].material != 1 || data.parts[5].material != 2) {
     fs::remove_all(dir, ec);
     return false;
   }
