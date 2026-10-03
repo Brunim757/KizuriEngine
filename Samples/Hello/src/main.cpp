@@ -1629,8 +1629,13 @@ bool TestMeshImportNormals() {
   Kizuri::MeshAssetData data;
   Kizuri::LogStore log;
   if (!Kizuri::ImportGltfMesh((dir / "model.gltf").string(), "", data, &log)) {
+    std::printf("normuv: import failed\n");
     fs::remove_all(dir, ec);
     return false;
+  }
+  std::printf("normuv: mats=%llu parts=%llu uvs=%llu warns=%llu\n", (unsigned long long)data.materials.size(), (unsigned long long)data.parts.size(), (unsigned long long)data.uvs.size(), (unsigned long long)log.Count());
+  for (size_t i = 0; i < data.uvs.size() && i < 12; ++i) {
+    std::printf("normuv: uv[%llu]=%.4f\n", (unsigned long long)i, data.uvs[i]);
   }
   if (data.materials.size() != 2 || data.materials[0].albedoTexGuid.empty()) {
     fs::remove_all(dir, ec);
