@@ -1415,6 +1415,44 @@ bool TestMeshImport() {
   }
   return true;
 }
+bool TestMeshImportTextured() {
+  namespace fs = std::filesystem;
+  fs::path dir = fs::temp_directory_path() / "kztexmesh_test";
+  std::error_code ec;
+  fs::remove_all(dir, ec);
+  fs::create_directories(dir, ec);
+  fs::copy_file("Samples/Assets/brickbox.gltf", dir / "brickbox.gltf", ec);
+  if (ec) {
+    return false;
+  }
+  fs::copy_file("Samples/Assets/brick.bmp", dir / "brick.bmp", ec);
+  if (ec) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  Kizuri::MeshAssetData data;
+  if (!Kizuri::ImportGltfMesh((dir / "brickbox.gltf").string(), "", data, nullptr)) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  if (data.materials.empty() || data.materials[0].albedoTexGuid.empty()) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  bool kztexFound = false;
+  for (fs::directory_iterator it(dir, ec); it != fs::directory_iterator(); ++it) {
+    if (it->path().extension() == ".kztex") {
+      kztexFound = true;
+      Kizuri::TextureAssetData tdata;
+      if (!Kizuri::DecodeTextureFile(it->path().string(), tdata) || tdata.guid != data.materials[0].albedoTexGuid) {
+        fs::remove_all(dir, ec);
+        return false;
+      }
+    }
+  }
+  fs::remove_all(dir, ec);
+  return kztexFound;
+}
 bool TestAssetDatabase() {
   namespace fs = std::filesystem;
   fs::path dir = fs::temp_directory_path() / "kzdb_test";
@@ -3195,6 +3233,7 @@ int main() {
   failures += Check("Guid", TestGuid());
   failures += Check("MeshCodec", TestMeshCodec());
   failures += Check("MeshImport", TestMeshImport());
+  failures += Check("MeshImportTextured", TestMeshImportTextured());
   failures += Check("AssetDatabase", TestAssetDatabase());
   failures += Check("SceneMeshGuid", TestSceneMeshGuid());
   failures += Check("ImportNoRetry", TestImportNoRetry());
