@@ -1470,13 +1470,26 @@ bool TestTexPixels() {
   }
   const uint8_t* dp = dec.GetPixels();
   int maxAbs = 0;
-  for (int i = 0; i < 16 * 16 * 4; ++i) {
-    int d = static_cast<int>(dp[i]) - static_cast<int>(spx[i]);
-    if (d < 0) {
-      d = -d;
-    }
-    if (d > maxAbs) {
-      maxAbs = d;
+  int maxX = 0;
+  int maxY = 0;
+  int maxC = 0;
+  int maxS = 0;
+  int maxD = 0;
+  for (int y = 0; y < 16; ++y) {
+    for (int x = 0; x < 16; ++x) {
+      for (int c = 0; c < 4; ++c) {
+        int i = (y * 16 + x) * 4 + c;
+        int d = static_cast<int>(dp[i]) - static_cast<int>(spx[i]);
+        int ad = d < 0 ? -d : d;
+        if (ad > maxAbs) {
+          maxAbs = ad;
+          maxX = x;
+          maxY = y;
+          maxC = c;
+          maxS = spx[i];
+          maxD = dp[i];
+        }
+      }
     }
   }
   int sx0[4] = { spx[0], spx[1], spx[2], spx[3] };
@@ -1485,6 +1498,7 @@ bool TestTexPixels() {
   int dx1[4] = { dp[(15 * 16 + 15) * 4 + 0], dp[(15 * 16 + 15) * 4 + 1], dp[(15 * 16 + 15) * 4 + 2], dp[(15 * 16 + 15) * 4 + 3] };
   stbi_image_free(spx);
   std::printf("texpixels: maxAbs=%d tl=%d,%d,%d br=%d,%d,%d\n", maxAbs, dx0[0], dx0[1], dx0[2], dx1[0], dx1[1], dx1[2]);
+  std::printf("texpixels: at=(%d,%d) ch=%d src=%d dec=%d\n", maxX, maxY, maxC, maxS, maxD);
   if (maxAbs > 32) {
     return false;
   }
