@@ -412,7 +412,7 @@ public:
       }
     }
     uint64_t id = nextId++;
-    samplers[id] = sampler;
+    cbuffers[id] = buf;
     return id;
   }
   RHISampler CreateSamplerWrap() override {
