@@ -249,17 +249,14 @@ bool ImportGltfMesh(const std::string& glbPath, const std::string& keepGuid, Mes
         }
         const cgltf_accessor* posAcc = nullptr;
         const cgltf_accessor* nrmAcc = nullptr;
-        const cgltf_accessor* uvAcc = nullptr;
-        const cgltf_accessor* uvAcc1 = nullptr;
+        const cgltf_accessor* uvSets[8] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
         for (size_t ai = 0; ai < prim.attributes_count; ++ai) {
           if (std::strcmp(prim.attributes[ai].name, "POSITION") == 0) {
             posAcc = prim.attributes[ai].data;
           } else if (std::strcmp(prim.attributes[ai].name, "NORMAL") == 0) {
             nrmAcc = prim.attributes[ai].data;
-          } else if (std::strcmp(prim.attributes[ai].name, "TEXCOORD_0") == 0) {
-            uvAcc = prim.attributes[ai].data;
-          } else if (std::strcmp(prim.attributes[ai].name, "TEXCOORD_1") == 0) {
-            uvAcc1 = prim.attributes[ai].data;
+          } else if (std::strncmp(prim.attributes[ai].name, "TEXCOORD_", 9) == 0 && prim.attributes[ai].name[9] >= '0' && prim.attributes[ai].name[9] <= '7' && prim.attributes[ai].name[10] == '\0') {
+            uvSets[prim.attributes[ai].name[9] - '0'] = prim.attributes[ai].data;
           }
         }
         int uvSet = 0;
@@ -282,10 +279,11 @@ bool ImportGltfMesh(const std::string& glbPath, const std::string& keepGuid, Mes
             }
           }
         }
-        const cgltf_accessor* uvSel = (uvSet == 1 && uvAcc1 != nullptr) ? uvAcc1 : uvAcc;
-        if (uvSet != 0 && uvSet != 1) {
-          uvSet = 0;
-          uvSel = uvAcc;
+        const cgltf_accessor* uvSel = uvSets[0];
+        if (uvSet >= 0 && uvSet < 8 && uvSets[uvSet] != nullptr) {
+          uvSel = uvSets[uvSet];
+        } else if (uvSet != 0) {
+          uvSel = nullptr;
         }
         bool uvUsable = (uvSel != nullptr);
         if (posAcc == nullptr || posAcc->count == 0) {

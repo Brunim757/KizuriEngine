@@ -1570,6 +1570,7 @@ bool TestMeshImportNormals() {
   unsigned char uvb[6] = { 0, 0, 255, 0, 0, 255 };
   float uvf[6] = { 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f };
   float uv1[6] = { 0.25f, 0.75f, 0.25f, 0.75f, 0.25f, 0.75f };
+  float uv2[6] = { 0.1f, 0.9f, 0.1f, 0.9f, 0.1f, 0.9f };
   uint16_t idx[3] = { 0, 1, 2 };
   bin.insert(bin.end(), reinterpret_cast<unsigned char*>(pos), reinterpret_cast<unsigned char*>(pos) + 36);
   bin.insert(bin.end(), reinterpret_cast<unsigned char*>(nrm), reinterpret_cast<unsigned char*>(nrm) + 36);
@@ -1577,6 +1578,7 @@ bool TestMeshImportNormals() {
   bin.insert(bin.end(), reinterpret_cast<unsigned char*>(uvf), reinterpret_cast<unsigned char*>(uvf) + 24);
   bin.insert(bin.end(), reinterpret_cast<unsigned char*>(idx), reinterpret_cast<unsigned char*>(idx) + 6);
   bin.insert(bin.end(), reinterpret_cast<unsigned char*>(uv1), reinterpret_cast<unsigned char*>(uv1) + 24);
+  bin.insert(bin.end(), reinterpret_cast<unsigned char*>(uv2), reinterpret_cast<unsigned char*>(uv2) + 24);
   {
     FILE* fp = std::fopen((dir / "model.bin").string().c_str(), "wb");
     if (fp == nullptr) {
@@ -1595,19 +1597,20 @@ bool TestMeshImportNormals() {
   json += "{\"buffer\":0,\"byteOffset\":72,\"byteLength\":6},";
   json += "{\"buffer\":0,\"byteOffset\":78,\"byteLength\":24},";
   json += "{\"buffer\":0,\"byteOffset\":102,\"byteLength\":6},";
-  json += "{\"buffer\":0,\"byteOffset\":108,\"byteLength\":24}],";
+  json += "{\"buffer\":0,\"byteOffset\":108,\"byteLength\":24},";
+  json += "{\"buffer\":0,\"byteOffset\":132,\"byteLength\":24}],";
   json += "\"accessors\":[";
   json += "{\"bufferView\":0,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"},";
   json += "{\"bufferView\":1,\"componentType\":5126,\"count\":3,\"type\":\"VEC3\"},";
   json += "{\"bufferView\":2,\"componentType\":5121,\"normalized\":true,\"count\":3,\"type\":\"VEC2\"},";
   json += "{\"bufferView\":3,\"componentType\":5126,\"count\":3,\"type\":\"VEC2\"},";
   json += "{\"bufferView\":4,\"componentType\":5123,\"count\":3,\"type\":\"SCALAR\"},";
-  json += "{\"bufferView\":5,\"componentType\":5126,\"count\":3,\"type\":\"VEC2\"}],";
+  json += "{\"bufferView\":5,\"componentType\":5126,\"count\":3,\"type\":\"VEC2\"},";
+  json += "{\"bufferView\":6,\"componentType\":5126,\"count\":3,\"type\":\"VEC2\"}],";
   json += "\"images\":[{\"uri\":\"brick.bmp\"}],";
   json += "\"textures\":[{\"source\":0}],";
   json += "\"materials\":[{\"name\":\"Shared\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[1,1,1,1],\"baseColorTexture\":{\"index\":0}}},";
-  json += "{\"name\":\"U1\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[1,1,1,1],\"baseColorTexture\":{\"index\":0,\"texCoord\":1}}},";
-  json += "{\"name\":\"Scaled\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[1,1,1,1],\"baseColorTexture\":{\"index\":0,\"extensions\":{\"KHR_texture_transform\":{\"offset\":[0.5,0.0],\"rotation\":0.0,\"scale\":[2.0,2.0]}}}}}],";
+  json += "{\"name\":\"U1\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[1,1,1,1],\"baseColorTexture\":{\"index\":0,\"texCoord\":1}}},";  json += "{\"name\":\"U2\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[1,1,1,1],\"baseColorTexture\":{\"index\":0,\"texCoord\":2}}},";  json += "{\"name\":\"Scaled\",\"pbrMetallicRoughness\":{\"baseColorFactor\":[1,1,1,1],\"baseColorTexture\":{\"index\":0,\"extensions\":{\"KHR_texture_transform\":{\"offset\":[0.5,0.0],\"rotation\":0.0,\"scale\":[2.0,2.0]}}}}}],";
   json += "\"extensionsUsed\":[\"KHR_texture_transform\"],";
   json += "\"meshes\":[{\"primitives\":[";
   json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":2},\"indices\":4,\"material\":0},";
@@ -1615,7 +1618,8 @@ bool TestMeshImportNormals() {
   json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":3},\"indices\":4},";
   json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1},\"indices\":4,\"material\":0},";
   json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_1\":5},\"indices\":4,\"material\":1},";
-  json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":3},\"indices\":4,\"material\":2}";
+  json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_0\":3},\"indices\":4,\"material\":2},";
+  json += "{\"attributes\":{\"POSITION\":0,\"NORMAL\":1,\"TEXCOORD_2\":6},\"indices\":4,\"material\":3}";
   json += "]}],";
   json += "\"nodes\":[{\"mesh\":0}],\"scenes\":[{\"nodes\":[0]}],\"scene\":0}";
   {
@@ -1635,15 +1639,15 @@ bool TestMeshImportNormals() {
     return false;
   }
   std::printf("normuv: mats=%llu parts=%llu uvs=%llu warns=%llu\n", (unsigned long long)data.materials.size(), (unsigned long long)data.parts.size(), (unsigned long long)data.uvs.size(), (unsigned long long)log.Count());
-  if (data.materials.size() != 3 || data.materials[0].albedoTexGuid.empty()) {
+  if (data.materials.size() != 4 || data.materials[0].albedoTexGuid.empty()) {
     fs::remove_all(dir, ec);
     return false;
   }
-  if (data.materials[0].texCoord != 0 || data.materials[1].texCoord != 1 || data.materials[2].texCoord != 0) {
+  if (data.materials[0].texCoord != 0 || data.materials[1].texCoord != 1 || data.materials[2].texCoord != 0 || data.materials[3].texCoord != 2) {
     fs::remove_all(dir, ec);
     return false;
   }
-  if (data.parts.size() != 6) {
+  if (data.parts.size() != 7) {
     fs::remove_all(dir, ec);
     return false;
   }
@@ -1653,7 +1657,7 @@ bool TestMeshImportNormals() {
       return false;
     }
   }
-  if (data.parts[4].material != 1 || data.parts[5].material != 2) {
+  if (data.parts[4].material != 1 || data.parts[5].material != 2 || data.parts[6].material != 3) {
     fs::remove_all(dir, ec);
     return false;
   }
@@ -1683,6 +1687,17 @@ bool TestMeshImportNormals() {
   float baked[6] = { 0.5f, 0.0f, 2.5f, 0.0f, 0.5f, 2.0f };
   for (size_t i = 0; i < 6; ++i) {
     if (std::fabs(data.uvs[30 + i] - baked[i]) > 1e-4f) {
+      fs::remove_all(dir, ec);
+      return false;
+    }
+  }
+  if (data.uvs.size() < 42) {
+    fs::remove_all(dir, ec);
+    return false;
+  }
+  for (size_t i = 36; i < 42; ++i) {
+    float want = (i % 2 == 0) ? 0.1f : 0.9f;
+    if (std::fabs(data.uvs[i] - want) > 1e-5f) {
       fs::remove_all(dir, ec);
       return false;
     }
