@@ -65,7 +65,6 @@ EditorApp::EditorApp()
   viewFogColor[0] = 0.6f;
   viewFogColor[1] = 0.7f;
   viewFogColor[2] = 0.8f;
-}
   renameBuf[0] = '\0';
   showNotifHistory = false;
   assetRenameBuf[0] = '\0';
